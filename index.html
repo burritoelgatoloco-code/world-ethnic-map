@@ -204,6 +204,14 @@ const FLAG_MAP = {"русские": "🇷🇺", "украинцы": "🇺🇦", 
 const LAYER_NAMES = {"1": "Слой 1", "2": "Слой 2", "3": "Слой 3", "4": "Слой 4", "5": "Слой 5", "6": "Слой 6"};
 const customFlags = {}; // name -> flag URL (loaded from Supabase, or local dataURL if offline)
 
+// Lookup table id -> NP object, used by the popup edit/delete actions. Declared early
+// (before it's first populated) so every later call to rebuildNpIndex() can find it.
+const npById = {};
+function rebuildNpIndex(){
+  for(const k in npById) delete npById[k];
+  DATA.forEach(np => { if(np.id) npById[np.id] = np; });
+}
+
 // ---------- Supabase (database for new NPs + custom flags) ----------
 const SUPABASE_URL = 'https://ikxxsftmvcogypceeqte.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_QHdtKLc3ePJGDFJ37rV0lA_7kVjs82k';
@@ -749,12 +757,6 @@ function openNpPopup(np){
   currentPopup = L.popup({ maxWidth: 280 }).setLatLng([np.lat, np.lng]).setContent(popupHtml(np)).openOn(map);
 }
 
-const npById = {};
-function rebuildNpIndex(){
-  for(const k in npById) delete npById[k];
-  DATA.forEach(np => { if(np.id) npById[np.id] = np; });
-}
-
 window.startEditNp = function(id){
   const np = npById[id];
   if(!np || !currentPopup) return;
@@ -885,14 +887,6 @@ npListEl.addEventListener('scroll', () => {
 document.getElementById('np-search').addEventListener('input', () => resetNpList());
 
 // ---------- Add new NP: geocoder search + manual coords + ethnicity form ----------
-document.getElementById('add-toggle-hint').onclick = () => {
-  const panel = document.getElementById('add-np-panel');
-  const hint = document.getElementById('add-toggle-hint');
-  const open = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : 'block';
-  hint.textContent = open ? 'развернуть ▾' : 'свернуть ▴';
-};
-
 let pendingCoords = null; // {lat,lng}
 
 // Free geocoder (OpenStreetMap Nominatim, no API key needed)
