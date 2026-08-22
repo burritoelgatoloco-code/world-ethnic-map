@@ -597,6 +597,7 @@ function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countF
       const sel = currentSelected();
       if(cb.checked) sel.add(cb.dataset.eth); else sel.delete(cb.dataset.eth);
       render();
+      resetNpList();
     }
   });
   reset('');
@@ -729,6 +730,8 @@ flagCanvas.addEventListener('click', (e) => {
   const closest = findNearestPoint(x, y, threshold);
   if(closest){
     openNpPopup(closest);
+  } else {
+    map.closePopup(); // clicked empty map area — close whatever popup was open
   }
 });
 
@@ -870,9 +873,9 @@ function parseEditLines(text){
 function editFormHtml(np){
   const descText = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
   return `<div class="eth-popup">
-    <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;">
-    <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;">${descText}</textarea>
-    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна.</div>
+    <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); saveEditNp('${np.id}');}">
+    <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;" onkeydown="if(event.key==='Enter' && (event.ctrlKey||event.metaKey)){event.preventDefault(); saveEditNp('${np.id}');}">${descText}</textarea>
+    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Ctrl+Enter в описании — сохранить.</div>
     <div class="btn-row">
       <div class="btn-mini" onclick="cancelEditNp('${np.id}')">Отмена</div>
       <div class="btn-mini" style="background:var(--accent); color:#fff;" onclick="saveEditNp('${np.id}')">Сохранить</div>
@@ -882,7 +885,7 @@ function editFormHtml(np){
 
 let currentPopup = null;
 function openNpPopup(np){
-  currentPopup = L.popup({ maxWidth: 280 }).setLatLng([np.lat, np.lng]).setContent(popupHtml(np)).openOn(map);
+  currentPopup = L.popup({ maxWidth: 280, closeOnClick: false, autoClose: false }).setLatLng([np.lat, np.lng]).setContent(popupHtml(np)).openOn(map);
 }
 
 window.startEditNp = function(id){
@@ -988,7 +991,7 @@ function npRow(np){
   return item;
 }
 function currentNpPool(){
-  return DATA.filter(np => enabledLayers.has(np.layer));
+  return DATA.filter(np => npVisible(np));
 }
 function renderNpChunk(){
   const slice = npFiltered.slice(renderedCount, renderedCount + CHUNK);
