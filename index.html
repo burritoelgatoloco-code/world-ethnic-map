@@ -22,7 +22,7 @@
     display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; z-index:10;
     transition:margin-left .2s; }
   #sidebar.collapsed { margin-left:-340px; }
-  #sidebar-toggle { position:absolute; top:12px; left:12px; z-index:20; width:38px; height:38px;
+  #sidebar-toggle { position:absolute; top:12px; left:12px; z-index:9999; width:38px; height:38px;
     border-radius:50%; border:none; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.3);
     font-size:16px; cursor:pointer; color:#5f6368; }
   #sidebar-toggle:hover { background:#f1f3f4; }
@@ -116,6 +116,10 @@
           <input id="new-layer-name" class="box" style="margin-bottom:0;" placeholder="Название нового слоя" />
           <div class="btn-mini" id="add-layer-btn" style="flex:0 0 40px;">+</div>
         </div>
+        <div class="hint" style="margin:8px 0 4px;">Резервная копия — на случай, если карта сломается или Supabase удалится:</div>
+        <div class="btn-row">
+          <div class="btn-mini" id="export-csv-btn">Скачать всё как CSV</div>
+        </div>
       </div>
     </div>
 
@@ -166,6 +170,7 @@
           <div class="mode-btn active" id="mode-or" title="Показать НП, где есть хотя бы один из выбранных">ИЛИ</div>
           <div class="mode-btn" id="mode-and" title="Показать НП, где есть ВСЕ выбранные одновременно">И</div>
           <div class="mode-btn" id="mode-dom" title="Показать НП, где выбранный — самый крупный (доминирует)">Больш-во</div>
+          <div class="mode-btn" id="mode-not" title="Показать НП, где выбранного этноса НЕТ вообще">НЕ</div>
         </div>
         <input id="eth-search" class="box" placeholder="Поиск этноса…" />
         <div class="btn-row">
@@ -246,8 +251,24 @@ function parseTag(part){
   }
   return { root: part.trim(), subs: [] };
 }
+// Splits on commas that are NOT inside parentheses, so "левантийцы (24% мусульмане, 22% марониты)"
+// stays as ONE piece instead of being torn apart at the comma inside the brackets.
+function splitTopLevel(s){
+  const parts = []; let depth = 0, start = 0;
+  for(let i=0; i<s.length; i++){
+    const ch = s[i];
+    if(ch === '(') depth++;
+    else if(ch === ')') depth = Math.max(0, depth-1);
+    else if(ch === ',' && depth === 0){
+      parts.push(s.slice(start, i));
+      start = i+1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts.map(p=>p.trim()).filter(Boolean);
+}
 function tagsOf(rawName){
-  return rawName.split(',').map(s=>s.trim()).filter(Boolean).map(parseTag);
+  return splitTopLevel(rawName).map(parseTag);
 }
 // The entry with the highest known percentage — NOT necessarily ethnicities[0], since the
 // display order now follows the original source text (which can start with an unknown-%
@@ -267,10 +288,12 @@ function tagSetOf(np, domOnly){
   return s;
 }
 // The "leading" root of the dominant entry — used to pick a single flag for a marker/cluster.
+// The flag shown on the map/list/popup always matches whatever is listed FIRST in the
+// description (top of the text), matching how the source data reads — NOT necessarily
+// whichever entry happens to have the single highest known percentage.
 function dominantRootOf(np){
-  const dom = dominantEntryOf(np);
-  if(!dom) return null;
-  const tags = tagsOf(dom.name);
+  if(!np.ethnicities.length) return null;
+  const tags = tagsOf(np.ethnicities[0].name);
   return tags.length ? tags[0].root : null;
 }
 
@@ -386,6 +409,30 @@ document.getElementById('add-layer-btn').onclick = async () => {
   }catch(err){ console.warn('Could not save new layer to Supabase:', err); }
 };
 
+// Downloads everything currently on the map — the original 54,188 points plus anything
+// added or edited since — as one CSV in the same WKT/name/description shape Google My Maps
+// uses, so it can also be re-imported there if this map ever needs rebuilding from scratch.
+document.getElementById('export-csv-btn').onclick = () => {
+  const rows = ['WKT,название,описание'];
+  DATA.forEach(np => {
+    const wkt = `"POINT (${np.lng} ${np.lat})"`;
+    const name = '"' + String(np.name).replace(/"/g,'""') + '"';
+    const desc = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
+    const descEscaped = '"' + desc.replace(/"/g,'""') + '"';
+    rows.push(`${wkt},${name},${descEscaped}`);
+  });
+  const csv = rows.join('\r\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ethnic-map-backup-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
 // ---------- Ethnicity / subethnicity counts (recomputed when layers toggle) ----------
 let rootPresence={}, subPresence={}, rootDominant={}, subDominant={};
 let allRoots=[], allSubs=[], allTags=[];
@@ -422,18 +469,20 @@ rebuildNpIndex();
 
 // ---------- Filter mode & selection ----------
 let mode = 'or';
-let selectedOr = new Set(allTags);
+let selectedOr = new Set(allRoots); // subethnicities start OFF by default (roots already cover every point)
 let selectedAnd = new Set();
 let selectedDom = new Set();
+let selectedNot = new Set();
 function currentSelected(){
   if(mode==='or') return selectedOr;
   if(mode==='and') return selectedAnd;
+  if(mode==='not') return selectedNot;
   return selectedDom;
 }
 function setMode(m){
   mode = m;
-  ['mode-or','mode-and','mode-dom'].forEach(id => document.getElementById(id).classList.remove('active'));
-  document.getElementById('mode-'+(m==='or'?'or':m==='and'?'and':'dom')).classList.add('active');
+  ['mode-or','mode-and','mode-dom','mode-not'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('mode-'+m).classList.add('active');
   rootList.reset(document.getElementById('eth-search').value);
   subList.reset(document.getElementById('sub-search').value);
   render();
@@ -441,6 +490,7 @@ function setMode(m){
 document.getElementById('mode-or').onclick = () => setMode('or');
 document.getElementById('mode-and').onclick = () => setMode('and');
 document.getElementById('mode-dom').onclick = () => setMode('dom');
+document.getElementById('mode-not').onclick = () => setMode('not');
 
 // ---------- Flag upload ----------
 const fileInput = document.getElementById('flag-file-input');
@@ -579,7 +629,8 @@ flagCanvas.style.position = 'absolute';
 flagCanvas.style.top = '0';
 flagCanvas.style.left = '0';
 map.getPanes().overlayPane.appendChild(flagCanvas);
-L.DomEvent.disableClickPropagation(flagCanvas); // stop clicks bubbling to the map's own click handler, which would otherwise instantly close the popup we're about to open
+// (click propagation is stopped inside the click handler itself, below — NOT via
+// disableClickPropagation, which would also block mousedown and break map dragging)
 const fctx = flagCanvas.getContext('2d');
 
 const imgCache = {}; // ethnicity name -> HTMLImageElement, for custom uploaded flags
@@ -658,6 +709,7 @@ map.on('moveend zoomend resize', drawFlags);
 
 // Click on the canvas -> find nearest flag under the cursor and open its popup.
 flagCanvas.addEventListener('click', (e) => {
+  L.DomEvent.stopPropagation(e); // only the click itself, so the map's own click handler doesn't instantly close the popup we're about to open — dragging (mousedown) is untouched
   const rect = flagCanvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   const zoom = map.getZoom();
@@ -677,10 +729,12 @@ flagCanvas.addEventListener('click', (e) => {
 
 function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
+  // NPs with no ethnicity data at all are always shown — they're deliberately empty,
+  // pending research, and should never get hidden by an ethnicity filter.
+  if(np.ethnicities.length === 0) return true;
   const sel = currentSelected();
   if(mode === 'dom'){
     if(sel.size === 0) return true;
-    if(np.ethnicities.length === 0) return false;
     const domTags = tagSetOf(np, true);
     for(const s of sel){ if(domTags.has(s)) return true; }
     return false;
@@ -688,12 +742,15 @@ function npVisible(np){
   const names = tagSetOf(np, false);
   if(mode === 'and'){
     if(sel.size === 0) return true;
-    if(names.size === 0) return false;
     for(const s of sel){ if(!names.has(s)) return false; }
     return true;
   }
-  if(sel.size === allTags.length) return true;
-  if(names.size === 0) return false;
+  if(mode === 'not'){
+    if(sel.size === 0) return true;
+    for(const s of sel){ if(names.has(s)) return false; }
+    return true;
+  }
+  // OR mode
   for(const s of sel){ if(names.has(s)) return true; }
   return false;
 }
@@ -830,9 +887,9 @@ function render(){
   });
   drawFlags();
   const sel = currentSelected();
-  const modeLabel = mode==='and' ? 'И' : mode==='dom' ? 'Больш.' : null;
+  const modeLabel = mode==='and' ? 'И' : mode==='dom' ? 'Больш.' : mode==='not' ? 'НЕ' : null;
   document.getElementById('eth-selected-count').textContent = mode==='or'
-    ? (sel.size===allTags.length ? '' : `(${sel.size}/${allTags.length})`)
+    ? (sel.size===allRoots.length ? '' : `(${sel.size}/${allTags.length})`)
     : (sel.size ? `(${modeLabel}: ${sel.size})` : '');
   let total = 0;
   enabledLayers.forEach(n => total += (layerCounts[n]||0));
@@ -847,7 +904,7 @@ const CHUNK = 150;
 
 function npRow(np){
   const domRoot = dominantRootOf(np);
-  const dominant = dominantEntryOf(np);
+  const dominant = np.ethnicities[0] || null;
   const item = document.createElement('div');
   item.className = 'np-item';
   item.innerHTML = `<span class="flag-ic">${domRoot?flagHtmlFor(domRoot,15):'🏳️'}</span><span class="np-name">${np.name}</span><span class="np-pct">${dominant&&dominant.pct_display!=null?dominant.pct_display+'%':''}</span><span class="np-layer">С${np.layer}</span>`;
@@ -1036,6 +1093,8 @@ document.querySelectorAll('.section-title.collapsible').forEach(header => {
 // ---------- Hide/show the whole sidebar ----------
 document.getElementById('sidebar-toggle').onclick = () => {
   document.getElementById('sidebar').classList.toggle('collapsed');
+  // let the CSS slide animation finish, then tell Leaflet the map area's size actually changed
+  setTimeout(() => map.invalidateSize(), 220);
 };
 
 
