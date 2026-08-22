@@ -100,10 +100,6 @@
   <div id="sidebar">
     <h1>Этническая карта Земли</h1>
     <div class="sub">54 188 НП, 6 слоёв. Клик по НП в списке — переход на карту.</div>
-    <div class="sub" style="padding-top:0; padding-bottom:12px;">
-      <span id="admin-toggle" style="color:var(--accent); cursor:pointer; font-size:11px;">Режим редактирования</span>
-      <span id="admin-status" style="display:none; color:#188038; font-size:11px; font-weight:600;">✓ Редактирование включено</span>
-    </div>
 
     <div class="section" id="layers-section" style="border-top:none; padding-bottom:6px; display:none;">
       <div class="section-title collapsible" data-target="layers-body">
@@ -273,13 +269,13 @@ function tagsOf(rawName){
 // The entry with the highest known percentage — NOT necessarily ethnicities[0], since the
 // display order now follows the original source text (which can start with an unknown-%
 // entry). Falls back to the first entry when nothing has a known percentage at all.
+// "Dominant" = whatever is listed FIRST (topmost) in the description — matching how the
+// source data was written (entries are ordered largest-to-smallest even when some don't
+// have an explicit percentage), NOT just whichever entry happens to have the single
+// largest explicit number. This keeps the flag, the "Большинство" filter, and the popup
+// all agreeing on the same entry.
 function dominantEntryOf(np){
-  if(!np.ethnicities.length) return null;
-  let best = null;
-  for(const e of np.ethnicities){
-    if(e.pct != null && (!best || e.pct > best.pct)) best = e;
-  }
-  return best || np.ethnicities[0];
+  return np.ethnicities.length ? np.ethnicities[0] : null;
 }
 function tagSetOf(np, domOnly){
   const s = new Set();
@@ -330,6 +326,8 @@ async function initMap(){
           if(row.deleted){ deletedIds.add(row.point_id); return; }
           if(row.name != null) np.name = row.name;
           if(row.ethnicities != null) np.ethnicities = row.ethnicities;
+          if(row.lat != null) np.lat = row.lat;
+          if(row.lng != null) np.lng = row.lng;
         });
         if(deletedIds.size){
           for(let i = DATA.length - 1; i >= 0; i--){
@@ -708,12 +706,7 @@ map.on('move zoom', scheduleRedraw);
 map.on('moveend zoomend resize', drawFlags);
 
 // Click on the canvas -> find nearest flag under the cursor and open its popup.
-flagCanvas.addEventListener('click', (e) => {
-  L.DomEvent.stopPropagation(e); // only the click itself, so the map's own click handler doesn't instantly close the popup we're about to open — dragging (mousedown) is untouched
-  const rect = flagCanvas.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  const zoom = map.getZoom();
-  const threshold = Math.max(8, iconSizeForZoom(zoom));
+function findNearestPoint(x, y, threshold){
   const bounds = map.getBounds().pad(0.2);
   let closest = null, closestDist = threshold;
   visiblePoints.forEach(np => {
@@ -722,16 +715,94 @@ flagCanvas.addEventListener('click', (e) => {
     const d = Math.hypot(pt.x - x, pt.y - y);
     if(d < closestDist){ closestDist = d; closest = np; }
   });
+  return closest;
+}
+
+let dragMoved = false; // set true right after a real drag finishes, to swallow the click that follows it
+
+flagCanvas.addEventListener('click', (e) => {
+  if(dragMoved){ dragMoved = false; return; }
+  L.DomEvent.stopPropagation(e); // only the click itself, so the map's own click handler doesn't instantly close the popup we're about to open — dragging (mousedown) is untouched
+  const rect = flagCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const threshold = Math.max(8, iconSizeForZoom(map.getZoom()));
+  const closest = findNearestPoint(x, y, threshold);
   if(closest){
     openNpPopup(closest);
   }
 });
 
+// ---------- Drag a flag to move its NP's location (edit mode only) ----------
+let dragCandidate = null; // holds {np, startX, startY} once mousedown happens near a point, before it's confirmed as an actual drag
+let dragActive = null;    // the NP actually being dragged right now
+
+flagCanvas.addEventListener('mousedown', (e) => {
+  if(!isAdmin) return;
+  const rect = flagCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const threshold = Math.max(8, iconSizeForZoom(map.getZoom()));
+  const np = findNearestPoint(x, y, threshold);
+  if(np) dragCandidate = { np, startX: e.clientX, startY: e.clientY };
+});
+
+document.addEventListener('mousemove', (e) => {
+  if(!dragCandidate && !dragActive) return;
+  if(!dragActive){
+    const dx = e.clientX - dragCandidate.startX, dy = e.clientY - dragCandidate.startY;
+    if(Math.hypot(dx, dy) < 4) return; // small jitter isn't a drag yet
+    dragActive = dragCandidate.np;
+    map.dragging.disable();
+    flagCanvas.style.cursor = 'grabbing';
+  }
+  const rect = flagCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const latlng = map.containerPointToLatLng([x, y]);
+  dragActive.lat = latlng.lat;
+  dragActive.lng = latlng.lng;
+  scheduleRedraw();
+});
+
+document.addEventListener('mouseup', async () => {
+  if(dragActive){
+    dragMoved = true;
+    map.dragging.enable();
+    flagCanvas.style.cursor = '';
+    const np = dragActive;
+    dragActive = null;
+    dragCandidate = null;
+    if(supabaseClient && np.id){
+      try{
+        if(np.id.startsWith('s-') && np.__dbId != null){
+          await supabaseClient.from('settlements').update({ lat: np.lat, lng: np.lng }).eq('id', np.__dbId);
+        } else {
+          await supabaseClient.from('edits').upsert({ point_id: np.id, lat: np.lat, lng: np.lng });
+        }
+      }catch(err){
+        console.warn('Could not save the new position:', err);
+        alert('Новое положение сохранилось только в этой вкладке — не удалось записать в базу.');
+      }
+    }
+  } else {
+    dragCandidate = null;
+  }
+});
+
+// True when the person has actually narrowed something down (picked specific
+// ethnicities/subs to filter by) — as opposed to just browsing with nothing selected.
+function isFilterActive(){
+  const sel = currentSelected();
+  if(mode === 'or') return sel.size !== allRoots.length;
+  return sel.size !== 0;
+}
+
 function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
-  // NPs with no ethnicity data at all are always shown — they're deliberately empty,
-  // pending research, and should never get hidden by an ethnicity filter.
-  if(np.ethnicities.length === 0) return true;
+  if(np.ethnicities.length === 0){
+    // NPs with no ethnicity data at all show up while just browsing (deliberately empty,
+    // pending research), but drop out the moment an actual ethnicity filter is applied —
+    // they can't match "русские" or "Большинство: украинцы" if they have no data at all.
+    return !isFilterActive();
+  }
   const sel = currentSelected();
   if(mode === 'dom'){
     if(sel.size === 0) return true;
@@ -1062,22 +1133,17 @@ document.getElementById('new-np-save').onclick = async () => {
   document.getElementById('manual-coords').value = '';
 };
 
-// ---------- Admin mode: hides the Layers panel and enables editing for everyone else ----------
-const ADMIN_PASSWORD = 'ethnic2026'; // change this string in the file if you want a different password
+// ---------- Admin mode: silent unlock via a secret link parameter — no prompt, no visible
+// toggle for regular visitors. Only YOU know/bookmark the link with ?edit=... on the end. ----------
+const ADMIN_SECRET = 'ethnic2026'; // change this string (and your bookmarked link) if you want a new secret
 let isAdmin = false;
-document.getElementById('admin-toggle').onclick = () => {
-  if(isAdmin) return;
-  const pw = prompt('Пароль для режима редактирования:');
-  if(pw === null) return;
-  if(pw === ADMIN_PASSWORD){
+try{
+  const params = new URLSearchParams(window.location.search);
+  if(params.get('edit') === ADMIN_SECRET){
     isAdmin = true;
-    document.getElementById('admin-toggle').style.display = 'none';
-    document.getElementById('admin-status').style.display = 'inline';
     document.getElementById('layers-section').style.display = 'flex';
-  } else {
-    alert('Неверный пароль');
   }
-};
+}catch(err){ /* ignore — just stays in read-only view */ }
 
 // ---------- Collapsible sidebar sections ----------
 document.querySelectorAll('.section-title.collapsible').forEach(header => {
