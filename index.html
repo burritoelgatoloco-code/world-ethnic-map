@@ -22,11 +22,13 @@
     display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; z-index:10;
     transition:margin-left .2s; }
   #sidebar.collapsed { margin-left:-340px; }
-  #sidebar-toggle { position:absolute; top:12px; left:12px; z-index:9999; width:38px; height:38px;
-    border-radius:50%; border:none; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.3);
-    font-size:16px; cursor:pointer; color:#5f6368; }
-  #sidebar-toggle:hover { background:#f1f3f4; }
-  #base-switch { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); z-index:20;
+  #sidebar-toggle { position:absolute; top:50%; left:340px; transform:translateY(-50%); z-index:9999;
+    width:18px; height:56px; border-radius:0 8px 8px 0; border:none; border-left:none;
+    background:#fff; box-shadow:2px 1px 4px rgba(0,0,0,.25); font-size:12px; cursor:pointer;
+    color:#5f6368; transition:left .2s; display:flex; align-items:center; justify-content:center; padding:0; }
+  #sidebar.collapsed ~ #sidebar-toggle { left:0; border-radius:0 8px 8px 0; }
+  #sidebar-toggle:hover { background:#f1f3f4; color:var(--accent); }
+  #base-switch { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); z-index:9999;
     display:flex; background:#fff; border-radius:20px; box-shadow:0 1px 4px rgba(0,0,0,.3); padding:3px; gap:2px; }
   .base-switch-btn { padding:7px 14px; border-radius:16px; font-size:12px; color:#5f6368; cursor:pointer; user-select:none; }
   .base-switch-btn.active { background:var(--accent); color:#fff; }
@@ -78,7 +80,7 @@
   #stats { padding:8px 18px; border-top:1px solid var(--panel-border); font-size:11.5px; color:var(--text-dim); flex-shrink:0; }
   #stats b { color:var(--text); }
 
-  #map { flex:1; }
+  #map { flex:1; position:relative; }
   .eth-popup { min-width:200px; max-width:280px; font-family:'Google Sans','Roboto',Arial,sans-serif; }
   .eth-popup .ph { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .eth-popup .ph .flag-ic { font-size:20px; width:auto; }
@@ -206,7 +208,7 @@
 
     <div id="stats"></div>
   </div>
-  <button id="sidebar-toggle" title="Скрыть/показать панель">☰</button>
+  <button id="sidebar-toggle" title="Скрыть/показать панель">‹</button>
   <div id="map"></div>
   <input type="file" id="flag-file-input" accept="image/*" style="display:none">
 </div>
@@ -762,7 +764,7 @@ baseSwitch.innerHTML = `
   <div class="base-switch-btn active" data-base="satellite">Спутник</div>
   <div class="base-switch-btn" data-base="streets">Схема</div>
   <div class="base-switch-btn" data-base="terrain">Рельеф</div>`;
-document.getElementById('app').appendChild(baseSwitch);
+document.getElementById('map').appendChild(baseSwitch);
 baseSwitch.querySelectorAll('.base-switch-btn').forEach(btn => {
   btn.onclick = () => setBaseLayer(btn.dataset.base);
 });
@@ -1302,7 +1304,8 @@ document.querySelectorAll('.section-title.collapsible').forEach(header => {
 
 // ---------- Hide/show the whole sidebar ----------
 document.getElementById('sidebar-toggle').onclick = () => {
-  document.getElementById('sidebar').classList.toggle('collapsed');
+  const collapsed = document.getElementById('sidebar').classList.toggle('collapsed');
+  document.getElementById('sidebar-toggle').textContent = collapsed ? '›' : '‹';
   // let the CSS slide animation finish, then tell Leaflet the map area's size actually changed
   setTimeout(() => map.invalidateSize(), 220);
 };
