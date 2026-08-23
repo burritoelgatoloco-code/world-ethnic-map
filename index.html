@@ -26,6 +26,11 @@
     border-radius:50%; border:none; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.3);
     font-size:16px; cursor:pointer; color:#5f6368; }
   #sidebar-toggle:hover { background:#f1f3f4; }
+  #base-switch { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); z-index:20;
+    display:flex; background:#fff; border-radius:20px; box-shadow:0 1px 4px rgba(0,0,0,.3); padding:3px; gap:2px; }
+  .base-switch-btn { padding:7px 14px; border-radius:16px; font-size:12px; color:#5f6368; cursor:pointer; user-select:none; }
+  .base-switch-btn.active { background:var(--accent); color:#fff; }
+  .base-switch-btn:hover:not(.active) { background:#f1f3f4; }
   #sidebar h1 { font-size:16px; font-weight:500; margin:0; padding:16px 18px 2px; color:var(--text); }
   #sidebar .sub { font-size:11.5px; color:var(--text-dim); padding:0 18px 10px; line-height:1.5; }
   .section { padding:9px 18px; border-top:1px solid var(--panel-border); display:flex; flex-direction:column; min-height:0; flex-shrink:0; }
@@ -136,9 +141,9 @@
           <div class="hint" id="new-np-coords" style="margin-bottom:4px;"></div>
           <input id="new-np-name" class="box" placeholder="Название НП" />
           <select id="new-np-layer" class="box"></select>
-          <div id="new-np-eth-rows"></div>
+          <textarea id="new-np-desc" class="box" style="font-family:'Consolas','Courier New',monospace; min-height:80px; border-radius:10px;" placeholder="78% - русские&#10;12% - украинцы&#10;..."></textarea>
+          <div class="hint" style="margin-bottom:6px;">Можно оставить пустым и вписать позже прямо в попапе точки. Одна запись на строку.</div>
           <div class="btn-row">
-            <div class="btn-mini" id="new-np-add-row">+ этнос</div>
             <div class="btn-mini" id="new-np-save">Сохранить НП</div>
           </div>
         </div>
@@ -403,8 +408,12 @@ document.getElementById('add-layer-btn').onclick = async () => {
   nameInput.value = '';
   renderLayersList();
   try{
-    await supabaseClient.from('custom_layers').insert({ number: nextNum, name });
-  }catch(err){ console.warn('Could not save new layer to Supabase:', err); }
+    const { error } = await supabaseClient.from('custom_layers').insert({ number: nextNum, name });
+    if(error) throw error;
+  }catch(err){
+    console.warn('Could not save new layer to Supabase:', err);
+    alert('Слой добавился только в этой вкладке — не удалось сохранить в базу: ' + (err.message||err));
+  }
 };
 
 // Downloads everything currently on the map — the original 54,188 points plus anything
@@ -518,7 +527,8 @@ fileInput.addEventListener('change', () => {
           const { data: pub } = supabaseClient.storage.from('flags').getPublicUrl(path);
           const publicUrl = pub.publicUrl;
           customFlags[uploadName] = publicUrl;
-          await supabaseClient.from('flags').upsert({ name: uploadName, url: publicUrl });
+          const { error: tableErr } = await supabaseClient.from('flags').upsert({ name: uploadName, url: publicUrl });
+          if(tableErr) console.warn('Flag file uploaded, but saving its name link failed:', tableErr);
           rootList.reset(document.getElementById('eth-search').value);
           subList.reset(document.getElementById('sub-search').value);
           resetNpList();
@@ -614,12 +624,48 @@ const subList  = buildToggleList(document.getElementById('sub-list'), document.g
 // ---------- Map ----------
 const map = L.map('map', { zoomControl:false }).setView([30, 20], 3);
 L.control.zoom({ position:'bottomright' }).addTo(map);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution:'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics', maxZoom:19
-}).addTo(map);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-  maxZoom:19, opacity:0.9
-}).addTo(map);
+
+const baseLayers = {
+  satellite: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution:'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics', maxZoom:19
+    }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom:19, opacity:0.9
+    })
+  ]),
+  streets: L.layerGroup([
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution:'&copy; OpenStreetMap contributors', maxZoom:19
+    })
+  ]),
+  terrain: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+      attribution:'Tiles &copy; Esri', maxZoom:19
+    })
+  ])
+};
+let currentBase = 'satellite';
+baseLayers[currentBase].addTo(map);
+
+function setBaseLayer(name){
+  if(name === currentBase || !baseLayers[name]) return;
+  map.removeLayer(baseLayers[currentBase]);
+  currentBase = name;
+  baseLayers[currentBase].addTo(map);
+  document.querySelectorAll('.base-switch-btn').forEach(b => b.classList.toggle('active', b.dataset.base === name));
+}
+
+const baseSwitch = document.createElement('div');
+baseSwitch.id = 'base-switch';
+baseSwitch.innerHTML = `
+  <div class="base-switch-btn active" data-base="satellite">Спутник</div>
+  <div class="base-switch-btn" data-base="streets">Схема</div>
+  <div class="base-switch-btn" data-base="terrain">Рельеф</div>`;
+document.getElementById('app').appendChild(baseSwitch);
+baseSwitch.querySelectorAll('.base-switch-btn').forEach(btn => {
+  btn.onclick = () => setBaseLayer(btn.dataset.base);
+});
 
 // ---------- No-cluster flag rendering (canvas) — like Google My Maps: every point stays
 // its own little flag, just scaled by zoom, never collapsed into a numbered bubble. ----------
@@ -775,14 +821,20 @@ document.addEventListener('mouseup', async () => {
     dragCandidate = null;
     if(supabaseClient && np.id){
       try{
+        let error;
         if(np.id.startsWith('s-') && np.__dbId != null){
-          await supabaseClient.from('settlements').update({ lat: np.lat, lng: np.lng }).eq('id', np.__dbId);
+          ({ error } = await supabaseClient.from('settlements').update({ lat: np.lat, lng: np.lng }).eq('id', np.__dbId));
         } else {
-          await supabaseClient.from('edits').upsert({ point_id: np.id, lat: np.lat, lng: np.lng });
+          // merge with any existing edit row first, so moving a point doesn't wipe out
+          // a name/description you already saved for it earlier
+          const { data: existing } = await supabaseClient.from('edits').select('*').eq('point_id', np.id).maybeSingle();
+          const payload = Object.assign({}, existing || {}, { point_id: np.id, lat: np.lat, lng: np.lng });
+          ({ error } = await supabaseClient.from('edits').upsert(payload));
         }
+        if(error) throw error;
       }catch(err){
         console.warn('Could not save the new position:', err);
-        alert('Новое положение сохранилось только в этой вкладке — не удалось записать в базу.');
+        alert('Новое положение сохранилось только в этой вкладке — не удалось записать в базу: ' + (err.message||err));
       }
     }
   } else {
@@ -874,8 +926,8 @@ function editFormHtml(np){
   const descText = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
   return `<div class="eth-popup">
     <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); saveEditNp('${np.id}');}">
-    <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;" onkeydown="if(event.key==='Enter' && (event.ctrlKey||event.metaKey)){event.preventDefault(); saveEditNp('${np.id}');}">${descText}</textarea>
-    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Ctrl+Enter в описании — сохранить.</div>
+    <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); saveEditNp('${np.id}');}">${descText}</textarea>
+    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Enter — сохранить, Shift+Enter — новая строка.</div>
     <div class="btn-row">
       <div class="btn-mini" onclick="cancelEditNp('${np.id}')">Отмена</div>
       <div class="btn-mini" style="background:var(--accent); color:#fff;" onclick="saveEditNp('${np.id}')">Сохранить</div>
@@ -892,6 +944,10 @@ window.startEditNp = function(id){
   const np = npById[id];
   if(!np || !currentPopup) return;
   currentPopup.setContent(editFormHtml(np));
+  setTimeout(() => {
+    const ta = document.getElementById('edit-desc');
+    if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  }, 30);
 };
 window.cancelEditNp = function(id){
   const np = npById[id];
@@ -910,14 +966,20 @@ window.saveEditNp = async function(id){
   subList.reset(document.getElementById('sub-search').value);
   resetNpList();
   render();
-  openNpPopup(np);
+  map.closePopup(); // close both the edit card and the popup itself, as requested
   if(!supabaseClient) return;
   try{
+    let error;
     if(id.startsWith('s-') && np.__dbId != null){
-      await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth }).eq('id', np.__dbId);
+      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth }).eq('id', np.__dbId));
     } else {
-      await supabaseClient.from('edits').upsert({ point_id: id, name: newName, ethnicities: newEth });
+      // merge with any existing edit row first, so this doesn't wipe out a position
+      // (lat/lng) you may have already saved for this point by dragging it earlier
+      const { data: existing } = await supabaseClient.from('edits').select('*').eq('point_id', id).maybeSingle();
+      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth });
+      ({ error } = await supabaseClient.from('edits').upsert(payload));
     }
+    if(error) throw error;
   }catch(err){
     console.warn('Could not save edit to Supabase:', err);
     alert('Изменение применилось только в этой вкладке — не удалось сохранить в базу: ' + (err.message||err));
@@ -939,11 +1001,13 @@ window.deleteNp = async function(id){
   map.closePopup();
   if(!supabaseClient) return;
   try{
+    let error;
     if(id.startsWith('s-') && np.__dbId != null){
-      await supabaseClient.from('settlements').delete().eq('id', np.__dbId);
+      ({ error } = await supabaseClient.from('settlements').delete().eq('id', np.__dbId));
     } else {
-      await supabaseClient.from('edits').upsert({ point_id: id, deleted: true });
+      ({ error } = await supabaseClient.from('edits').upsert({ point_id: id, deleted: true }));
     }
+    if(error) throw error;
   }catch(err){
     console.warn('Could not delete in Supabase:', err);
     alert('Удаление применилось только в этой вкладке — не удалось сохранить в базу: ' + (err.message||err));
@@ -1068,43 +1132,20 @@ function selectNewLocation(lat, lng, suggestedName){
   document.getElementById('new-np-form').style.display = 'block';
   document.getElementById('new-np-coords').textContent = `Координаты: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   if(suggestedName) document.getElementById('new-np-name').value = suggestedName;
-  document.getElementById('new-np-eth-rows').innerHTML = '';
-  addEthRow();
+  document.getElementById('new-np-desc').value = '';
   map.flyTo([lat, lng], 12, { duration: 0.6 });
+  setTimeout(() => document.getElementById('new-np-desc').focus(), 50);
 }
 
-function addEthRow(){
-  const row = document.createElement('div');
-  row.style.cssText = 'display:flex; gap:6px; margin-bottom:4px;';
-  row.innerHTML = `
-    <input class="box new-eth-name" style="margin-bottom:0; flex:2;" placeholder="этнос">
-    <input class="box new-eth-pct" style="margin-bottom:0; flex:1;" placeholder="%">`;
-  document.getElementById('new-np-eth-rows').appendChild(row);
-}
-document.getElementById('new-np-add-row').onclick = addEthRow;
+document.getElementById('new-np-desc').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); document.getElementById('new-np-save').click(); }
+});
 
 document.getElementById('new-np-save').onclick = async () => {
   if(!pendingCoords){ return; }
   const name = document.getElementById('new-np-name').value.trim();
   if(!name){ alert('Введите название НП'); return; }
-  const rows = document.querySelectorAll('#new-np-eth-rows > div');
-  const ethnicities = [];
-  rows.forEach(r => {
-    const nm = r.querySelector('.new-eth-name').value.trim().toLowerCase();
-    const pctStr = r.querySelector('.new-eth-pct').value.trim();
-    if(!nm) return;
-    if(pctStr){
-      const pct = parseFloat(pctStr.replace(',','.'));
-      if(!isNaN(pct)) ethnicities.push({ pct, pct_display: pctStr, name: nm });
-    } else {
-      ethnicities.push({ pct: null, pct_display: null, name: nm });
-    }
-  });
-  ethnicities.sort((a,b) => {
-    if(a.pct==null) return 1;
-    if(b.pct==null) return -1;
-    return b.pct - a.pct;
-  });
+  const ethnicities = parseEditLines(document.getElementById('new-np-desc').value);
   const chosenLayer = parseInt(document.getElementById('new-np-layer').value) || LAYER_NUMBERS[0];
   const newNp = { lat: pendingCoords.lat, lng: pendingCoords.lng, name, ethnicities, layer: chosenLayer };
   DATA.push(newNp);
