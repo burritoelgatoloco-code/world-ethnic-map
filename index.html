@@ -121,6 +121,13 @@
         <div class="btn-row">
           <div class="btn-mini" id="export-csv-btn">Скачать всё как CSV</div>
         </div>
+        <div class="hint" style="margin:8px 0 4px;">Массовый импорт из CSV (формат «WKT,название,описание» — как при выгрузке из Google My Maps или из кнопки выше):</div>
+        <select id="bulk-import-layer" class="box"></select>
+        <input type="file" id="bulk-import-file" accept=".csv" style="display:none">
+        <div class="btn-row">
+          <div class="btn-mini" id="bulk-import-btn">Загрузить CSV-файл…</div>
+        </div>
+        <div id="bulk-import-status" class="hint"></div>
       </div>
     </div>
 
@@ -383,17 +390,19 @@ layersListEl.addEventListener('change', e => {
 });
 
 function renderLayerPicker(){
-  const sel = document.getElementById('new-np-layer');
-  if(!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = '';
-  LAYER_NUMBERS.forEach(num => {
-    const opt = document.createElement('option');
-    opt.value = num;
-    opt.textContent = LAYER_NAMES[num] || ('Слой '+num);
-    sel.appendChild(opt);
+  ['new-np-layer', 'bulk-import-layer'].forEach(id => {
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '';
+    LAYER_NUMBERS.forEach(num => {
+      const opt = document.createElement('option');
+      opt.value = num;
+      opt.textContent = LAYER_NAMES[num] || ('Слой '+num);
+      sel.appendChild(opt);
+    });
+    if(prev && LAYER_NUMBERS.includes(parseInt(prev))) sel.value = prev;
   });
-  if(prev && LAYER_NUMBERS.includes(parseInt(prev))) sel.value = prev;
 }
 
 document.getElementById('add-layer-btn').onclick = async () => {
@@ -439,6 +448,97 @@ document.getElementById('export-csv-btn').onclick = () => {
   a.remove();
   URL.revokeObjectURL(url);
 };
+
+// ---------- Bulk import: CSV with the same WKT/name/description shape as the export above
+// (also matches a raw Google My Maps layer export) — handles quoted multi-line fields. ----------
+function parseCsvRows(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else{ inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\r'){ /* ignore, \n below closes the row */ }
+      else if(c === '\n'){ row.push(field); field = ''; rows.push(row); row = []; }
+      else { field += c; }
+    }
+  }
+  if(field !== '' || row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+
+document.getElementById('bulk-import-btn').onclick = () => document.getElementById('bulk-import-file').click();
+document.getElementById('bulk-import-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const statusEl = document.getElementById('bulk-import-status');
+  statusEl.textContent = 'Читаю файл…';
+  const text = await file.text();
+  const allRows = parseCsvRows(text);
+  const pointRe = /POINT\s*\(\s*([\-\d.]+)\s+([\-\d.]+)\s*\)/i;
+  const parsed = [];
+  allRows.forEach((r, i) => {
+    if(i === 0 && /wkt/i.test(r[0]||'')) return; // skip header row
+    if(!r[0]) return;
+    const m = r[0].match(pointRe);
+    if(!m) return;
+    const lng = parseFloat(m[1]), lat = parseFloat(m[2]);
+    if(isNaN(lat) || isNaN(lng)) return;
+    const name = (r[1]||'').trim() || '(без названия)';
+    const ethnicities = parseEditLines(r[2]||'');
+    parsed.push({ lat, lng, name, ethnicities });
+  });
+  if(!parsed.length){
+    statusEl.textContent = 'Не нашёл ни одной точки в этом файле (проверьте, что это тот же формат — WKT,название,описание).';
+    e.target.value = '';
+    return;
+  }
+  const layerNum = parseInt(document.getElementById('bulk-import-layer').value) || LAYER_NUMBERS[0];
+  const layerName = LAYER_NAMES[layerNum] || ('Слой '+layerNum);
+  if(!confirm(`Найдено ${parsed.length} НП в файле. Импортировать все в слой «${layerName}»?`)){
+    statusEl.textContent = '';
+    e.target.value = '';
+    return;
+  }
+  statusEl.textContent = `Импортирую ${parsed.length} НП…`;
+  parsed.forEach(p => { p.layer = layerNum; DATA.push(p); });
+  layerCounts[layerNum] = (layerCounts[layerNum]||0) + parsed.length;
+  renderLayersList();
+  recomputeCounts();
+  rebuildNpIndex();
+  rootList.reset(document.getElementById('eth-search').value);
+  subList.reset(document.getElementById('sub-search').value);
+  resetNpList();
+  render();
+  if(supabaseClient){
+    try{
+      const payload = parsed.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, ethnicities: p.ethnicities, layer: p.layer }));
+      const { data: inserted, error } = await supabaseClient.from('settlements').insert(payload).select();
+      if(error) throw error;
+      if(inserted){
+        inserted.forEach((row, i) => {
+          if(parsed[i]){ parsed[i].__dbId = row.id; parsed[i].id = 's-'+row.id; }
+        });
+        rebuildNpIndex();
+      }
+      statusEl.textContent = `Готово — импортировано ${parsed.length} НП, сохранено в базу.`;
+    }catch(err){
+      console.warn('Bulk import: could not save to Supabase:', err);
+      statusEl.textContent = `Импортировано ${parsed.length} НП, но в базу сохранить не удалось (${err.message||err}) — видно только в этой вкладке.`;
+    }
+  } else {
+    statusEl.textContent = `Импортировано ${parsed.length} НП (только в этой вкладке — база не подключена).`;
+  }
+  e.target.value = '';
+});
 
 // ---------- Ethnicity / subethnicity counts (recomputed when layers toggle) ----------
 let rootPresence={}, subPresence={}, rootDominant={}, subDominant={};
