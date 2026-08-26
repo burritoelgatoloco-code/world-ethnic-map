@@ -307,13 +307,28 @@ function dominantRootOf(np){
 }
 
 // ---------- Load persisted data from Supabase (new NPs + custom flags), then build the UI ----------
+async function fetchAllRows(table){
+  // Supabase/PostgREST caps a single request at 1000 rows by default — page through
+  // in chunks so we actually get everything once you're past that many settlements.
+  const pageSize = 1000;
+  let all = [], from = 0;
+  while(true){
+    const { data, error } = await supabaseClient.from(table).select('*').range(from, from + pageSize - 1);
+    if(error){ console.warn(`Could not load "${table}" from Supabase:`, error); break; }
+    if(!data || !data.length) break;
+    all = all.concat(data);
+    if(data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 async function initMap(){
   const customLayerNumbers = [];
   if(supabaseClient){
     try{
-      const { data: extraSettlements, error: settlementsErr } = await supabaseClient.from('settlements').select('*');
-      if(settlementsErr) console.warn('Could not load saved NPs from Supabase:', settlementsErr);
-      if(extraSettlements){
+      const extraSettlements = await fetchAllRows('settlements');
+      if(extraSettlements.length){
         extraSettlements.forEach(row => {
           DATA.push({
             lat: row.lat, lng: row.lng, name: row.name,
@@ -321,19 +336,16 @@ async function initMap(){
           });
         });
       }
-      const { data: extraFlags, error: flagsErr } = await supabaseClient.from('flags').select('*');
-      if(flagsErr) console.warn('Could not load custom flags from Supabase:', flagsErr);
-      if(extraFlags){
+      const extraFlags = await fetchAllRows('flags');
+      if(extraFlags.length){
         extraFlags.forEach(row => { customFlags[row.name] = row.url; });
       }
-      const { data: extraLayers, error: layersErr } = await supabaseClient.from('custom_layers').select('*');
-      if(layersErr) console.warn('Could not load custom layers from Supabase:', layersErr);
-      if(extraLayers){
+      const extraLayers = await fetchAllRows('custom_layers');
+      if(extraLayers.length){
         extraLayers.forEach(row => { LAYER_NAMES[row.number] = row.name; customLayerNumbers.push(row.number); });
       }
-      const { data: extraEdits, error: editsErr } = await supabaseClient.from('edits').select('*');
-      if(editsErr) console.warn('Could not load saved edits from Supabase:', editsErr);
-      if(extraEdits){
+      const extraEdits = await fetchAllRows('edits');
+      if(extraEdits.length){
         const byId = {};
         DATA.forEach(np => { if(np.id) byId[np.id] = np; });
         const deletedIds = new Set();
