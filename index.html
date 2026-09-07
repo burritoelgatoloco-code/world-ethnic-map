@@ -41,10 +41,10 @@
   .section-title.collapsible .chevron { transition:transform .15s; color:var(--text-dim); font-size:13px; }
   .section-title.collapsible.open .chevron { transform:rotate(90deg); }
   .section-body { padding-top:8px; }
-  input.box { width:100%; padding:10px 14px; background:#f1f3f4; border:1px solid transparent;
+  input.box, select.box { width:100%; padding:10px 14px; background:#f1f3f4; border:1px solid transparent;
     border-radius:24px; color:var(--text); font-size:13px; outline:none; margin-bottom:6px;
     box-shadow:0 1px 3px rgba(0,0,0,.08); transition:box-shadow .15s, background .15s; }
-  input.box:focus { background:#fff; border-color:var(--accent); box-shadow:0 1px 6px rgba(26,115,232,.25); }
+  input.box:focus, select.box:focus { background:#fff; border-color:var(--accent); box-shadow:0 1px 6px rgba(26,115,232,.25); }
   #layers-list { display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
   .layer-item { display:flex; align-items:center; gap:8px; padding:5px 7px; font-size:12.5px; border-radius:8px; }
   .layer-item .cnt { margin-left:auto; color:var(--text-dim); font-size:10.5px; }
@@ -190,6 +190,18 @@
           <div class="btn-mini" id="select-none">Выключить все</div>
         </div>
         <div id="eth-list" style="max-height:220px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="section" id="country-section">
+      <div class="section-title collapsible" data-target="country-body">
+        <span>Страна <span id="country-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="country-body" style="display:none;">
+        <select id="country-select" class="box" style="margin-bottom:0;">
+          <option value="">Все страны</option>
+        </select>
       </div>
     </div>
 
@@ -1082,10 +1094,91 @@ document.getElementById('pct-to').addEventListener('input', e => {
 document.getElementById('pct-reset').onclick = () => setPctFilter(null, null, -1, null);
 renderPctPresets();
 
+// ---------- Страна: another independent filter, based on point-in-polygon lookup against
+// a bundled world country-borders file (countries.geo.json, served as a plain static file
+// next to index.html — same folder, no database involved). Country is figured out lazily,
+// the first time each NP is actually checked (and cached on the NP itself afterwards), so
+// there's no upfront cost unless the filter is actually used. ----------
+let COUNTRIES = null; // filled in once countries.geo.json has loaded
+let selectedCountry = ''; // '' = no filter (show all countries)
+
+function ringsFromGeometry(geom){
+  // Normalizes both Polygon and MultiPolygon into a flat list of "sub-polygons",
+  // each itself a list of rings (ring 0 = outer boundary, the rest = holes).
+  if(geom.type === 'Polygon') return [geom.coordinates];
+  if(geom.type === 'MultiPolygon') return geom.coordinates;
+  return [];
+}
+function pointInRing(lng, lat, ring){
+  let inside = false;
+  for(let i = 0, j = ring.length - 1; i < ring.length; j = i++){
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const crosses = ((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if(crosses) inside = !inside;
+  }
+  return inside;
+}
+function pointInSubPolygon(lng, lat, rings){
+  // Even-odd rule across outer ring + holes: inside outer, XOR each hole it also falls in.
+  let inside = false;
+  for(const ring of rings){
+    if(pointInRing(lng, lat, ring)) inside = !inside;
+  }
+  return inside;
+}
+function pointInCountry(lng, lat, country){
+  if(lng < country.bbox[0] || lng > country.bbox[2] || lat < country.bbox[1] || lat > country.bbox[3]) return false;
+  return country.polys.some(rings => pointInSubPolygon(lng, lat, rings));
+}
+function lookupCountry(lat, lng){
+  if(!COUNTRIES) return null;
+  for(const c of COUNTRIES){
+    if(pointInCountry(lng, lat, c)) return c.name_ru;
+  }
+  return null;
+}
+function countryOf(np){
+  if(np.__country === undefined) np.__country = lookupCountry(np.lat, np.lng);
+  return np.__country;
+}
+function countryVisible(np){
+  if(!selectedCountry) return true;
+  if(!COUNTRIES) return false; // borders not loaded yet — nothing can match, avoid a wrong flash of results
+  return countryOf(np) === selectedCountry;
+}
+
+fetch('countries.geo.json').then(r => r.json()).then(geo => {
+  COUNTRIES = geo.features.map(f => {
+    const polys = ringsFromGeometry(f.geometry);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polys.forEach(rings => rings[0].forEach(([x, y]) => {
+      if(x < minX) minX = x; if(x > maxX) maxX = x;
+      if(y < minY) minY = y; if(y > maxY) maxY = y;
+    }));
+    return { name_ru: f.properties.name_ru, polys, bbox: [minX, minY, maxX, maxY] };
+  });
+  const select = document.getElementById('country-select');
+  const names = COUNTRIES.map(c => c.name_ru).sort((a, b) => a.localeCompare(b, 'ru'));
+  names.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    select.appendChild(opt);
+  });
+}).catch(err => {
+  console.error('Не удалось загрузить countries.geo.json (фильтр по стране будет недоступен):', err);
+});
+document.getElementById('country-select').addEventListener('change', e => {
+  selectedCountry = e.target.value;
+  document.getElementById('country-active-label').textContent = selectedCountry ? `(${selectedCountry})` : '';
+  render();
+  resetNpList();
+});
 
 function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
   if(!pctVisible(np)) return false;
+  if(!countryVisible(np)) return false;
   if(np.ethnicities.length === 0){
     // NPs with no ethnicity data at all show up while just browsing (deliberately empty,
     // pending research), but drop out the moment an actual ethnicity filter is applied —
