@@ -23,7 +23,7 @@
     color:#5f6368; transition:left .2s; display:flex; align-items:center; justify-content:center; padding:0; }
   #sidebar.collapsed ~ #sidebar-toggle { left:0; border-radius:0 8px 8px 0; }
   #sidebar-toggle:hover { background:#f1f3f4; color:var(--accent); }
-  h1 { font-size:16px; font-weight:500; margin:0; padding:16px 18px 2px; color:var(--text); }
+  h1 { font-size:16px; font-weight:500; margin:0; padding:16px 18px 10px; color:var(--text); }
   .section { padding:9px 18px; border-top:1px solid var(--panel-border); display:flex; flex-direction:column; min-height:0; flex-shrink:0; }
   .section-title { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim);
     margin-bottom:7px; font-weight:600; flex-shrink:0; display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; }
@@ -49,7 +49,7 @@
   .hint { font-size:10.5px; color:var(--text-dim); padding:3px 2px; line-height:1.4; }
   .edit-link { font-size:12px; color:var(--accent); cursor:pointer; font-weight:500; padding:4px 2px; }
   .edit-link:hover { text-decoration:underline; }
-  #np-list { flex:1; overflow-y:auto; min-height:0; }
+  #np-list { max-height:220px; overflow-y:auto; }
   .np-item { display:flex; align-items:center; gap:7px; padding:6px 8px; border-radius:8px; cursor:pointer; font-size:12.5px; }
   .np-item:hover { background:#f1f3f4; }
   .np-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -57,10 +57,14 @@
   #stats { padding:8px 18px; border-top:1px solid var(--panel-border); font-size:11.5px; color:var(--text-dim); flex-shrink:0; }
   #stats b { color:var(--text); }
   #map { flex:1; position:relative; }
-  .maplibregl-popup-content { font-family:inherit; font-size:13px; padding:12px 14px; border-radius:10px; max-width:260px; }
-  .popup-name { font-weight:600; margin-bottom:6px; font-size:14px; }
-  .popup-eth-row { display:flex; align-items:center; gap:6px; padding:1px 0; }
-  .popup-pct { color:var(--text-dim); font-size:11.5px; margin-left:auto; }
+  .maplibregl-popup-content { font-family:inherit; padding:12px 14px; border-radius:10px; }
+  .eth-popup { min-width:200px; max-width:280px; font-family:'Google Sans','Roboto',Arial,sans-serif; }
+  .eth-popup .ph { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .eth-popup .ph .flag-ic { font-size:20px; width:auto; }
+  .eth-popup h3 { margin:0; font-size:16px; font-weight:500; color:#202124; }
+  .eth-popup .plain { font-size:14px; line-height:1.7; white-space:pre-line; color:#3c4043; font-family:'Google Sans','Roboto',Arial,sans-serif; }
+  .flag-ic { font-size:14px; width:18px; text-align:center; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; }
+  .flag-ic img { width:18px; height:13px; object-fit:cover; border-radius:2px; box-shadow:0 0 0 1px rgba(0,0,0,.08); }
   .pop-footer { margin-top:10px; padding-top:8px; border-top:1px solid #e8eaed; display:flex; align-items:center; justify-content:space-between; }
   .pop-footer .coords { font-size:11px; color:#5f6368; }
   .pop-footer .pop-actions { display:flex; gap:6px; }
@@ -106,9 +110,9 @@
       </div>
     </div>
 
-    <div class="section" id="search-section" style="flex:1; min-height:0; display:flex;">
+    <div class="section" id="search-section">
       <div class="section-title collapsible open" data-target="search-body"><span>Населённые пункты</span><span class="chevron">▸</span></div>
-      <div class="section-body" id="search-body" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+      <div class="section-body" id="search-body" style="display:block;">
         <input id="np-search" class="box" placeholder="Поиск НП…" />
         <div id="np-list"></div>
       </div>
@@ -138,6 +142,17 @@
           <input id="pct-to" type="number" min="0" max="100" class="box" style="margin-bottom:0;" placeholder="до %" />
         </div>
         <div class="btn-row"><div class="pct-chip" id="pct-reset">Сбросить</div></div>
+      </div>
+    </div>
+
+    <div class="section" id="flags-section" style="display:none;">
+      <div class="section-title collapsible" data-target="flags-body"><span>Свои флаги</span><span class="chevron">▸</span></div>
+      <div class="section-body" id="flags-body" style="display:none;">
+        <input id="flag-name-input" class="box" placeholder="Название этноса (точно как в данных)" list="flag-name-options" />
+        <datalist id="flag-name-options"></datalist>
+        <input type="file" id="flag-file-input" accept="image/*" class="box" style="padding:8px 10px;" />
+        <div class="btn-row"><div class="btn-mini" id="flag-upload-btn">Загрузить флаг</div></div>
+        <div class="hint" id="flag-upload-status"></div>
       </div>
     </div>
 
@@ -178,6 +193,40 @@ function flagFor(name){
   if(FLAG_MAP[base]) return FLAG_MAP[base];
   return '🏳️';
 }
+const SUPABASE_URL = 'https://ikxxsftmvcogypceeqte.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_QHdtKLc3ePJGDFJ37rV0lA_7kVjs82k';
+const customFlags = {}; // name -> flag URL, loaded from Supabase (public, small table — safe for every viewer)
+function flagHtmlFor(name, px){
+  px = px || 16;
+  if(customFlags[name]){
+    const h = Math.round(px*0.72);
+    return `<img src="${customFlags[name]}" style="width:${px}px;height:${h}px;object-fit:cover;border-radius:2px;vertical-align:middle;">`;
+  }
+  return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
+}
+function applyCustomFlagImage(name, url){
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try{ if(map.hasImage(name)) map.updateImage(name, img); else map.addImage(name, img, {pixelRatio:1}); }
+    catch(err){ console.warn('Не удалось применить кастомный флаг для', name, err); }
+  };
+  img.onerror = () => console.warn('Не удалось загрузить изображение кастомного флага:', url);
+  img.src = url;
+}
+async function loadCustomFlags(){
+  try{
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/flags?select=name,url`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer '+SUPABASE_KEY }
+    });
+    const rows = await res.json();
+    (rows || []).forEach(row => { customFlags[row.name] = row.url; applyCustomFlagImage(row.name, row.url); });
+  }catch(err){ console.warn('Не удалось загрузить кастомные флаги:', err); }
+}
+
+// Same sizing curve as the original canvas renderer: clamp(7, 38, (zoom-1)*2.8) px,
+// expressed as a fraction of our 72px sprite source images.
+const ICON_SIZE_EXPR = ['interpolate', ['linear'], ['zoom'], 1, 7/72, 1 + 38/2.8, 38/72];
 
 function buildStyle(){
   const sources = {
@@ -196,7 +245,7 @@ function buildStyle(){
     sources['points'+L] = { type:'vector', url:'pmtiles://tiles/points_layer'+L+'.pmtiles' };
     layers.push({
       id:'points-layer-'+L, type:'symbol', source:'points'+L, 'source-layer':'points',
-      layout:{ 'icon-image':['get','icon'], 'icon-size':0.26, 'icon-allow-overlap':true, 'icon-ignore-placement':true },
+      layout:{ 'icon-image':['get','icon'], 'icon-size':ICON_SIZE_EXPR, 'icon-allow-overlap':true, 'icon-ignore-placement':true },
     });
   });
   return { version:8,
@@ -328,14 +377,19 @@ const npCache = {}; // id -> {id,name,lat,lng,ethnicities} — last-seen data fo
 const openPopups = {}; // id -> maplibregl.Popup
 
 function popupReadHtml(np){
-  const rows = (np.ethnicities || []).map(en => `<div class="popup-eth-row"><span>${flagFor(en.name)}</span><span>${en.name}</span><span class="popup-pct">${en.pct_display != null ? en.pct_display+'%' : ''}</span></div>`).join('')
-    || '<div style="color:var(--text-dim);">Нет данных об этносах</div>';
+  const domRoot = dominantRootOf(np);
+  const lines = (np.ethnicities || []).map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : `${e.name}`);
+  const plain = lines.length ? lines.join('\n') : 'Нет данных об этносах';
   const footer = isAdmin ? `<div class="pop-footer"><span class="coords">📍 ${np.lat.toFixed(5)}, ${np.lng.toFixed(5)}</span>
       <span class="pop-actions">
         <span class="pop-icon" title="Редактировать" onclick="startEditNp('${np.id}')">✏️</span>
         <span class="pop-icon" title="Удалить" onclick="deleteNp('${np.id}')">🗑️</span>
       </span></div>` : `<div class="pop-footer"><span class="coords">📍 ${np.lat.toFixed(5)}, ${np.lng.toFixed(5)}</span></div>`;
-  return `<div class="popup-name">${np.name}</div>${rows}${footer}`;
+  return `<div class="eth-popup">
+    <div class="ph"><span class="flag-ic">${domRoot?flagHtmlFor(domRoot,18):'🏳️'}</span><h3>${np.name}</h3></div>
+    <div class="plain">${plain}</div>
+    ${footer}
+  </div>`;
 }
 function popupEditHtml(np){
   const descText = (np.ethnicities || []).map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
@@ -363,11 +417,15 @@ function openPopupForFeature(f){
 map.on('click', (e) => {
   const layers = isAdmin ? [...POINT_LAYER_IDS, 'live-overlay-layer'] : POINT_LAYER_IDS;
   const feats = map.queryRenderedFeatures(e.point, { layers });
-  if(!feats.length) return;
+  if(!feats.length){
+    Object.values(openPopups).forEach(p => p.remove());
+    return;
+  }
   openPopupForFeature(feats[0]);
 });
 map.on('mouseenter', POINT_LAYER_IDS, () => map.getCanvas().style.cursor = 'pointer');
 map.on('mouseleave', POINT_LAYER_IDS, () => map.getCanvas().style.cursor = '');
+map.on('load', () => loadCustomFlags());
 
 // ---------- Поиск / список НП ----------
 let SEARCH_DATA = [];
@@ -457,6 +515,11 @@ function parseEditLines(text){
 
 if(isAdmin){
   document.getElementById('add-np-section').style.display = 'flex';
+  document.getElementById('flags-section').style.display = 'flex';
+  fetch('ethnicity-names.json').then(r => r.json()).then(names => {
+    const dl = document.getElementById('flag-name-options');
+    names.forEach(name => { const opt = document.createElement('option'); opt.value = name; dl.appendChild(opt); });
+  }).catch(err => console.warn('ethnicity-names.json недоступен — автодополнение названий не будет работать', err));
 
   // supabase-js is only loaded when actually needed (admin only) — regular viewers never fetch it
   const sbScript = document.createElement('script');
@@ -477,14 +540,12 @@ function rebuildLiveSource(){
 }
 
 function initAdmin(){
-  const SUPABASE_URL = 'https://ikxxsftmvcogypceeqte.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_QHdtKLc3ePJGDFJ37rV0lA_7kVjs82k';
   window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   if(!map.getSource('live-overlay')){
     map.addSource('live-overlay', { type:'geojson', data:{type:'FeatureCollection', features:[]} });
     map.addLayer({ id:'live-overlay-layer', type:'symbol', source:'live-overlay',
-      layout:{ 'icon-image':['get','icon'], 'icon-size':0.26, 'icon-allow-overlap':true, 'icon-ignore-placement':true } });
+      layout:{ 'icon-image':['get','icon'], 'icon-size':ICON_SIZE_EXPR, 'icon-allow-overlap':true, 'icon-ignore-placement':true } });
   }
 
   loadLiveData();
@@ -557,6 +618,38 @@ function initAdmin(){
     document.getElementById('geo-search').value = '';
     document.getElementById('geo-results').innerHTML = '';
     document.getElementById('manual-coords').value = '';
+  };
+
+  // ---------- Загрузка своих флагов ----------
+  document.getElementById('flag-upload-btn').onclick = async () => {
+    const name = document.getElementById('flag-name-input').value.trim().toLowerCase();
+    const fileInput = document.getElementById('flag-file-input');
+    const statusEl = document.getElementById('flag-upload-status');
+    const f = fileInput.files[0];
+    if(!name){ alert('Введите название этноса — точно как оно записано в данных'); return; }
+    if(!f){ alert('Выберите файл картинки'); return; }
+    statusEl.textContent = 'Загрузка…';
+    try{
+      const ext = (f.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      // Storage keys must be ASCII-safe — the (often Cyrillic) ethnicity name is never put
+      // in the file path itself; it's only stored in the "flags" table as the lookup key.
+      const path = `flag-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: upErr } = await window.supabaseClient.storage.from('flags').upload(path, f, { upsert:true });
+      if(upErr) throw upErr;
+      const { data: pub } = window.supabaseClient.storage.from('flags').getPublicUrl(path);
+      const publicUrl = pub.publicUrl;
+      const { error: tableErr } = await window.supabaseClient.from('flags').upsert({ name, url: publicUrl });
+      if(tableErr) throw tableErr;
+      customFlags[name] = publicUrl;
+      applyCustomFlagImage(name, publicUrl);
+      rebuildLiveSource();
+      statusEl.textContent = `Готово — флаг для «${name}» применён.`;
+      fileInput.value = '';
+      document.getElementById('flag-name-input').value = '';
+    }catch(err){
+      statusEl.textContent = '';
+      alert('Не удалось загрузить флаг: ' + (err.message||err));
+    }
   };
 
   // ---------- Первичная загрузка живых данных: новые НП и правки/удаления к существующим ----------
@@ -654,7 +747,7 @@ document.querySelectorAll('.section-title.collapsible').forEach(header => {
   header.addEventListener('click', () => {
     const body = document.getElementById(header.dataset.target);
     const open = body.style.display !== 'none';
-    body.style.display = open ? 'none' : (header.dataset.target === 'search-body' ? 'flex' : 'block');
+    body.style.display = open ? 'none' : 'block';
     header.classList.toggle('open', !open);
   });
 });
