@@ -182,16 +182,10 @@ maplibregl.addProtocol('pmtiles', protocol.tile);
 const LAYERS = [1,2,3,4,5,6,7];
 const LAYER_NAMES = {1:'Слой 1',2:'Слой 2',3:'Слой 3',4:'Слой 4',5:'Слой 5',6:'Слой 6',7:'Слой 7'};
 
-// ---------- FLAG_MAP: only used for popup HTML (regular DOM text, which CAN render
-// color emoji) — the map symbols themselves use the pre-baked sprite instead, since
-// MapLibre's GL text renderer cannot draw color emoji. ----------
-const FLAG_MAP = {"русские": "🇷🇺", "украинцы": "🇺🇦", "немцы": "🇩🇪", "англичане": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "ирландцы": "🇮🇪", "казахи": "🇰🇿", "шотландцы": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "татары": "🏳️", "итальянцы": "🇮🇹", "французы": "🇫🇷", "румыны": "🇷🇴", "голландцы": "🇳🇱", "поляки": "🇵🇱", "испанцы": "🇪🇸", "метисы": "🌎", "шведы": "🇸🇪", "африканцы": "🌍", "норвежцы": "🇳🇴", "???": "🏳️", "чуваши": "🏳️", "ромы": "🏳️", "венгры": "🇭🇺", "армяне": "🇦🇲", "валлийцы": "🏴󠁧󠁢󠁷󠁬󠁳󠁿", "белорусы": "🇧🇾", "азербайджанцы": "🇦🇿", "словаки": "🇸🇰", "евреи": "🇮🇱", "чехи": "🇨🇿", "китайцы": "🇨🇳", "болгары": "🇧🇬", "узбеки": "🇺🇿", "чеченцы": "🏳️", "сербы": "🇷🇸", "датчане": "🇩🇰", "греки": "🇬🇷", "хорваты": "🇭🇷", "грузины": "🇬🇪", "таджики": "🇹🇯", "аварцы": "🏳️", "башкиры": "🏳️", "португальцы": "🇵🇹", "марийцы": "🏳️", "арабы": "🏳️", "корейцы": "🇰🇷", "даргинцы": "🏳️", "удмурты": "🏳️", "индейцы": "🏳️", "турки": "🇹🇷", "буряты": "🏳️", "индийцы": "🇮🇳", "мулаты": "🏳️", "финны": "🇫🇮", "литовцы": "🇱🇹", "тагальцы": "🇵🇭", "якуты": "🏳️", "тсвана": "🇧🇼", "лезгины": "🏳️", "албанцы": "🇦🇱", "вьеты": "🇻🇳", "хиндустанцы": "🇮🇳", "филиппинцы": "🇵🇭", "эрзяне": "🏳️", "киргизы": "🇰🇬", "мордвины": "🏳️", "коса": "🇿🇦", "аборигены": "🏳️", "осетины": "🏳️", "уйгуры": "🏳️", "кумыки": "🏳️", "чиппева": "🏳️", "кри": "🏳️", "калмыки": "🏳️", "эвенки": "🏳️", "русины": "🏳️", "курды": "🏳️", "гагаузы": "🏳️", "японцы": "🇯🇵", "сото": "🇱🇸", "зулу": "🇿🇦", "табасараны": "🏳️", "латыши": "🇱🇻", "крымские татары": "🏳️", "коми": "🏳️", "ногайцы": "🏳️", "алтайцы": "🏳️", "левантийцы": "🏳️", "пенджабцы": "🏳️", "эвены": "🏳️", "мальтийцы": "🇲🇹", "лакцы": "🏳️", "бошняки": "🇧🇦", "цветные": "🏳️", "исландцы": "🇮🇸", "окситанцы": "🏳️", "карачаевцы": "🏳️", "тувинцы": "🏳️", "черкесы": "🏳️", "мегрелы": "🏳️", "ндебеле": "🏳️", "ингуши": "🏳️", "мокшане": "🏳️", "словенцы": "🇸🇮", "каталонцы": "🏳️", "ненцы": "🏳️", "эстонцы": "🇪🇪", "ханты": "🏳️", "гавайцы": "🏳️", "баски": "🏳️", "агулы": "🏳️", "персы": "🇮🇷", "тамилы": "🏳️", "рутульцы": "🏳️", "другие": "🏳️", "ассирийцы": "🏳️", "туркмены": "🇹🇲", "хакасы": "🏳️", "бретонцы": "🏳️", "микмаки": "🏳️", "инуиты": "🏳️", "карелы": "🏳️", "каракалпаки": "🏳️", "чукчи": "🏳️", "илоки": "🇵🇭", "сингальцы": "🇱🇰", "тайцы": "🇹🇭", "непальцы": "🇳🇵", "дидойцы": "🏳️", "арпитанцы": "🏳️", "бенгальцы": "🇧🇩", "тубалары": "🏳️", "абхазы": "🏳️", "пакистанцы": "🇵🇰", "кхмеры": "🇰🇭", "коряки": "🏳️", "коми-пермяки": "🏳️", "сиу": "🏳️", "гуджаратцы": "🇮🇳", "нигерийцы": "🇳🇬", "тсонга": "🏳️", "малаяли": "🇮🇳", "цахуры": "🏳️", "месопотамцы": "🏳️", "теленгиты": "🏳️", "абазины": "🏳️", "салиши": "🏳️", "египтяне": "🇪🇬", "черногорцы": "🇲🇪", "долганы": "🏳️", "ительмены": "🏳️", "молдаване": "🇲🇩", "мексиканцы": "🇲🇽", "македонцы": "🇲🇰", "друзы": "🏳️", "дунгане": "🏳️", "пшавы": "🏳️", "марониты": "🏳️", "бацбийцы": "🏳️", "хевсуры": "🏳️", "смешанные": "🏳️", "ольстерские шотландцы": "🇬🇧", "австрийцы": "🇦🇹", "алавиты": "🏳️", "африканеры": "🇿🇦", "ашкали": "🏳️", "балкарцы": "🏳️", "бедуины": "🏳️", "белые": "🏳️", "боша": "🏳️", "влахи": "🏳️", "доминиканцы": "🇩🇴", "европейцы": "🇪🇺", "езиды": "🏳️", "зулу/коса": "🇿🇦", "иракцы": "🇮🇶", "иранцы": "🇮🇷", "йеменцы": "🇾🇪", "караимы": "🏳️", "кистинцы": "🏳️", "копты": "🏳️", "кряшены": "🏳️", "кувейтцы": "🇰🇼", "кызылбаши": "🏳️", "ливанцы": "🇱🇧", "помаки": "🏳️", "пуэрториканцы": "🇵🇷", "среднеазиатские": "🏳️", "сэрвы": "🏳️", "таты": "🏳️", "торбеши": "🏳️", "фламандцы": "🏳️", "чанго": "🏳️", "швейцарцы": "🇨🇭", "?": "🏳️", "румыны (молдаване)": "🇷🇴", "метисы (мексиканцы)": "🇲🇽", "овамбо": "🇳🇦", "лазы": "🏳️", "сомалийцы": "🇸🇴", "кабокло": "🇧🇷", "аймара": "🇧🇴", "мохавки": "🏳️", "малайцы": "🇲🇾", "галисийцы": "🇪🇸", "самоанцы": "🇼🇸", "пайюты": "🏳️", "манси": "🏳️", "телугу": "🇮🇳", "тлингиты": "🏳️", "субсахарные африканцы": "🌍", "илоканцы": "🇵🇭", "юкагиры": "🏳️", "лаосцы": "🇱🇦", "индонезийцы": "🇮🇩", "инну": "🏳️", "хмонги": "🏳️", "пуштуны": "🇦🇫", "венда": "🇿🇦", "эфиопы": "🇪🇹", "шошоны": "🏳️", "андийцы": "🏳️", "маори": "🇳🇿", "фризы": "🇳🇱", "\"хиспаник\"": "🌎", "кумандинцы": "🏳️", "гуарани": "🇵🇾", "челканцы": "🏳️", "кеты": "🏳️", "кабовердийцы": "🇨🇻", "яванцы": "🇮🇩", "фриулы": "🇮🇹", "либерийцы": "🇱🇷", "ваханцы": "🏳️", "селькупы": "🏳️", "юты": "🏳️", "каратинцы": "🏳️", "белуджи": "🏳️", "тиграи": "🇪🇹", "монголы": "🇲🇳", "чуванцы": "🏳️", "самбо": "🏳️", "бирманцы": "🇲🇲", "чероки": "🏳️", "маратхи": "🇮🇳", "хазарейцы": "🇦🇫", "бежтинцы": "🏳️", "блэкфуты": "🏳️", "йоруба": "🇳🇬", "ахтна": "🏳️", "фиджийцы": "🇫🇯"};
+// flagFor/flagHtmlFor: popup HTML (regular DOM text) — real flags only ever come from
+// your own uploads (customFlags); anything else shows the neutral placeholder.
 function flagFor(name){
-  if(!name) return '🏳️';
-  if(FLAG_MAP[name]) return FLAG_MAP[name];
-  const base = name.replace(/\s*\(.*?\)\s*/g,'').trim();
-  if(FLAG_MAP[base]) return FLAG_MAP[base];
-  return '🏳️';
+  return '🏳️'; // neutral placeholder — real flags only ever come from your own uploads (customFlags)
 }
 const SUPABASE_URL = 'https://ikxxsftmvcogypceeqte.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_QHdtKLc3ePJGDFJ37rV0lA_7kVjs82k';
@@ -204,11 +198,24 @@ function flagHtmlFor(name, px){
   }
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
 }
+const FLAG_REF_W = 72; // must match the reference width used by ICON_SIZE_EXPR
 function applyCustomFlagImage(name, url){
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
-    try{ if(map.hasImage(name)) map.updateImage(name, img); else map.addImage(name, img, {pixelRatio:1}); }
+    try{
+      // Uploaded images can be any resolution — always resize down to our standard
+      // reference width first, so icon-size (which assumes a 72px-wide source) renders
+      // it at the correct on-screen size instead of huge (native res) or tiny.
+      const scale = FLAG_REF_W / img.naturalWidth;
+      const w = FLAG_REF_W;
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      if(map.hasImage(name)) map.updateImage(name, canvas); else map.addImage(name, canvas, {pixelRatio:1});
+    }
     catch(err){ console.warn('Не удалось применить кастомный флаг для', name, err); }
   };
   img.onerror = () => console.warn('Не удалось загрузить изображение кастомного флага:', url);
@@ -259,6 +266,22 @@ const map = new maplibregl.Map({
   container:'map', style:buildStyle(), center:[40,50], zoom:3, attributionControl:true,
 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+// Raster basemap tiles (Esri/OSM) look crisp only at whole zoom levels — at any fractional
+// zoom the GPU has to up/downscale the tile texture, which is exactly the "blurry, as if
+// compressed" look. Leaflet snaps to whole zooms by default; MapLibre doesn't, so we snap
+// it back ourselves once each zoom gesture settles.
+let snappingZoom = false;
+map.on('zoomend', () => {
+  if(snappingZoom) return;
+  const z = map.getZoom();
+  const rounded = Math.round(z);
+  if(Math.abs(z - rounded) > 0.02){
+    snappingZoom = true;
+    map.easeTo({ zoom: rounded, duration: 150 });
+    map.once('moveend', () => { snappingZoom = false; });
+  }
+});
 
 const POINT_LAYER_IDS = LAYERS.map(L => 'points-layer-'+L);
 
@@ -395,7 +418,8 @@ function popupReadHtml(np){
 }
 function popupEditHtml(np){
   const descText = (np.ethnicities || []).map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
-  return `<input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;">
+  return `<div class="hint" id="edit-coords" style="margin-bottom:6px;">📍 ${np.lat.toFixed(5)}, ${np.lng.toFixed(5)} — перетащите красную метку на карте, чтобы сдвинуть точку</div>
+    <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;">
     <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;">${descText}</textarea>
     <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна.</div>
     <div class="btn-row">
@@ -499,7 +523,7 @@ function iconFor(ethnicities){
   if(!ethnicities || !ethnicities.length) return 'no_data';
   const dom = dominantRootOf({ethnicities});
   if(dom === '???') return 'unknown_pct';
-  if(FLAG_MAP[dom]) return dom;
+  if(customFlags[dom] || map.hasImage(dom)) return dom;
   return 'default_flag';
 }
 function parseEditLines(text){
@@ -543,6 +567,10 @@ function rebuildLiveSource(){
 }
 
 function initAdmin(){
+  if(!map.isStyleLoaded()){
+    map.once('load', initAdmin);
+    return;
+  }
   window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   if(!map.getSource('live-overlay')){
@@ -688,13 +716,28 @@ function initAdmin(){
     }catch(err){ console.warn('Не удалось загрузить живые данные из Supabase:', err); }
   }
 
+  const dragMarkers = {}; // id -> maplibregl.Marker, only while that point is being edited
+  function removeDragMarker(id){
+    if(dragMarkers[id]){ dragMarkers[id].remove(); delete dragMarkers[id]; }
+  }
   window.startEditNp = function(id){
     const np = npCache[id];
     const popup = openPopups[id];
     if(!np || !popup) return;
     popup.setHTML(popupEditHtml(np));
+    removeDragMarker(id);
+    const marker = new maplibregl.Marker({ draggable:true, color:'#ea4335' })
+      .setLngLat([np.lng, np.lat]).addTo(map);
+    marker.on('dragend', () => {
+      const { lng, lat } = marker.getLngLat();
+      npCache[id].lng = lng; npCache[id].lat = lat;
+      const coordsEl = document.getElementById('edit-coords');
+      if(coordsEl) coordsEl.textContent = `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} (перетащено)`;
+    });
+    dragMarkers[id] = marker;
   };
   window.cancelEditNp = function(id){
+    removeDragMarker(id);
     const np = npCache[id];
     if(np) openPopupForFeature({ properties:{ id:np.id, name:np.name, eth: JSON.stringify(np.ethnicities||[]) }, geometry:{coordinates:[np.lng, np.lat]} });
   };
@@ -703,15 +746,19 @@ function initAdmin(){
     if(!cached) return;
     const newName = document.getElementById('edit-name').value.trim() || cached.name;
     const newEth = parseEditLines(document.getElementById('edit-desc').value);
+    // If the marker was dragged, use its latest position (cached.lat/lng already updated live).
     const updated = Object.assign({}, cached, { name:newName, ethnicities:newEth });
     npCache[id] = updated;
+    removeDragMarker(id);
     try{
       if(id.startsWith('s-') && liveById[id]){
-        const { error } = await window.supabaseClient.from('settlements').update({ name:newName, ethnicities:newEth }).eq('id', liveById[id].__dbId);
+        const { error } = await window.supabaseClient.from('settlements')
+          .update({ name:newName, ethnicities:newEth, lat:updated.lat, lng:updated.lng }).eq('id', liveById[id].__dbId);
         if(error) throw error;
         liveById[id] = updated;
       } else {
-        const { error } = await window.supabaseClient.from('edits').upsert({ point_id:id, name:newName, ethnicities:newEth });
+        const { error } = await window.supabaseClient.from('edits')
+          .upsert({ point_id:id, name:newName, ethnicities:newEth, lat:updated.lat, lng:updated.lng });
         if(error) throw error;
         hiddenBaselineIds.add(id);
         liveById[id] = updated;
@@ -726,6 +773,7 @@ function initAdmin(){
   window.deleteNp = async function(id){
     const np = npCache[id];
     if(!np || !confirm(`Удалить «${np.name}» с карты?`)) return;
+    removeDragMarker(id);
     try{
       if(id.startsWith('s-') && liveById[id]){
         const { error } = await window.supabaseClient.from('settlements').delete().eq('id', liveById[id].__dbId);
