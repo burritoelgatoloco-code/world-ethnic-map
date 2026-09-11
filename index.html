@@ -220,29 +220,40 @@ function flagHtmlFor(name, px){
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
 }
 const FLAG_MAX_DIM = 72; // cap so huge uploads don't render oversized — real aspect ratio is otherwise kept exactly
-function applyCustomFlagImage(name, url){
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    try{
-      // Keep each flag's own true proportions — a real miniature, not squeezed into a shared
-      // box. MapLibre's updateImage() requires an exact size match with whatever was
-      // registered before, which real flags of varying shapes can't guarantee — so instead
-      // we remove any existing image under this name and add a fresh one at its own size.
-      const scale = FLAG_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
-      const w = Math.max(1, Math.round(img.naturalWidth * scale));
-      const h = Math.max(1, Math.round(img.naturalHeight * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      if(map.hasImage(name)) map.removeImage(name);
-      map.addImage(name, canvas, {pixelRatio:1});
+function loadFlagImage(url){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image failed to load'));
+    img.src = url;
+  });
+}
+async function applyCustomFlagImage(name, url){
+  try{
+    const img = await loadFlagImage(url);
+    if(!img.naturalWidth || !img.naturalHeight){
+      console.warn('Кастомный флаг для', name, 'пустой/битый — пропускаю:', url);
+      return;
     }
-    catch(err){ console.warn('Не удалось применить кастомный флаг для', name, err); }
-  };
-  img.onerror = () => console.warn('Не удалось загрузить изображение кастомного флага:', url);
-  img.src = url;
+    // Keep each flag's own true proportions — a real miniature, not squeezed into a shared
+    // box. MapLibre's updateImage() requires an exact size match with whatever was
+    // registered before, which real flags of varying shapes can't guarantee — so instead
+    // we remove any existing image under this name and add a fresh one at its own size.
+    const scale = FLAG_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    // Pass ImageData rather than the raw canvas — it's the one input type addImage always
+    // accepts unambiguously, avoiding any risk to the shared sprite atlas for OTHER icons.
+    const imageData = ctx.getImageData(0, 0, w, h);
+    if(map.hasImage(name)) map.removeImage(name);
+    map.addImage(name, imageData, {pixelRatio:1});
+  }
+  catch(err){ console.warn('Не удалось применить кастомный флаг для', name, err); }
 }
 async function loadCustomFlags(){
   try{
@@ -250,7 +261,17 @@ async function loadCustomFlags(){
       headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer '+SUPABASE_KEY }
     });
     const rows = await res.json();
-    (rows || []).forEach(row => { customFlags[row.name] = row.url; applyCustomFlagImage(row.name, row.url); });
+    // One at a time, not all ~200+ in a simultaneous burst — much gentler on the map's
+    // internal style/atlas state, and any single bad image can't affect the others.
+    for(const row of (rows || [])){
+      customFlags[row.name] = row.url;
+      await applyCustomFlagImage(row.name, row.url);
+    }
+    // Lists that were already rendered before flags finished loading were showing the
+    // generic placeholder — refresh them now that real images are registered.
+    if(typeof resetNpList === 'function') resetNpList();
+    if(typeof rootList !== 'undefined') rootList.reset(document.getElementById('eth-search').value);
+    if(typeof subList !== 'undefined') subList.reset(document.getElementById('sub-search').value);
   }catch(err){ console.warn('Не удалось загрузить кастомные флаги:', err); }
 }
 
@@ -290,30 +311,38 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-// Raster basemap tiles (Esri/OSM) look crisp only at whole zoom levels — at any fractional
-// zoom the GPU has to up/downscale the tile texture, which is exactly the "blurry, as if
-// compressed" look. Leaflet snaps to whole zooms by default; MapLibre doesn't, so we snap
-// it back ourselves — but only after the whole gesture has genuinely settled (a continuous
-// scroll/pinch fires many intermediate zoomend events, and snapping on each of those is
-// what caused the visible bounce/rollback while still mid-gesture).
-let snappingZoom = false;
-let zoomSnapTimer = null;
-map.on('zoomstart', () => { if(zoomSnapTimer){ clearTimeout(zoomSnapTimer); zoomSnapTimer = null; } });
-map.on('zoomend', () => {
-  if(snappingZoom) return;
-  if(zoomSnapTimer) clearTimeout(zoomSnapTimer);
-  zoomSnapTimer = setTimeout(() => {
-    zoomSnapTimer = null;
-    if(map.isMoving()) return;
-    const z = map.getZoom();
-    const rounded = Math.round(z);
-    if(Math.abs(z - rounded) > 0.02){
-      snappingZoom = true;
-      map.easeTo({ zoom: rounded, duration: 150 });
-      map.once('moveend', () => { snappingZoom = false; });
-    }
-  }, 250);
-});
+// Raster basemap tiles (Esri/OSM) look crisp only at whole zoom levels, and a physical mouse
+// wheel's default MapLibre handling animates a little "ease" for every single notch — with
+// several notches in quick succession those little animations visibly fight each other
+// (the reported jitter/bounce). Leaflet avoids this by accumulating wheel input and jumping
+// once, after scrolling pauses, straight to a whole zoom level — replicated here for regular
+// mouse-wheel input. Trackpad pinch-zoom (browsers report it as wheel events with
+// ctrlKey=true) is left alone, using MapLibre's own smooth handling, since that's a
+// continuous gesture rather than discrete notches.
+map.scrollZoom.disable();
+let wheelAccum = 0, wheelTimer = null, wheelClientPoint = null;
+map.getCanvasContainer().addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = map.getCanvas().getBoundingClientRect();
+  const point = [e.clientX - rect.left, e.clientY - rect.top];
+  if(e.ctrlKey){
+    // Trackpad pinch-zoom is a continuous gesture, not discrete notches — respond
+    // immediately and smoothly rather than debouncing/snapping like mouse-wheel below.
+    map.easeTo({ zoom: map.getZoom() - e.deltaY * 0.01, around: map.unproject(point), duration: 0 });
+    return;
+  }
+  wheelAccum += (e.deltaY < 0 ? 1 : -1);
+  wheelClientPoint = point;
+  if(wheelTimer) clearTimeout(wheelTimer);
+  wheelTimer = setTimeout(() => {
+    wheelTimer = null;
+    const steps = wheelAccum;
+    wheelAccum = 0;
+    if(!steps) return;
+    const targetZoom = Math.round(map.getZoom()) + steps;
+    map.easeTo({ zoom: targetZoom, around: map.unproject(wheelClientPoint), duration: 220 });
+  }, 90);
+}, { passive:false });
 
 const POINT_LAYER_IDS = LAYERS.map(L => 'points-layer-'+L);
 
@@ -608,6 +637,7 @@ map.on('mousedown', (e) => {
   const layers = [...POINT_LAYER_IDS, 'live-overlay-layer'].filter(id => map.getLayer(id));
   const feats = map.queryRenderedFeatures(e.point, { layers });
   if(!feats.length) return;
+  e.preventDefault(); // claim this interaction so MapLibre's own map-panning never starts for it
   const f = feats[0];
   const p = f.properties;
   let eth = [];
