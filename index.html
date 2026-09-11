@@ -43,6 +43,21 @@
   .base-switch-btn.active { background:var(--accent); color:#fff; }
   .base-switch-btn:hover:not(.active) { background:#e8eaed; }
   .pct-chip { padding:5px 8px; font-size:11px; font-weight:500; border-radius:14px; cursor:pointer; color:var(--text-dim); background:#f1f3f4; }
+  .mode-row { display:flex; gap:0; margin-bottom:6px; flex-shrink:0; background:#f1f3f4; border-radius:20px; padding:2px; }
+  .mode-btn { flex:1; text-align:center; padding:6px 3px; font-size:10.5px; font-weight:500; border-radius:18px; cursor:pointer; color:var(--text-dim); }
+  .mode-btn.active { background:var(--accent); color:#fff; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .toggle-item { display:flex; align-items:center; gap:7px; padding:5px 7px; font-size:12.5px; border-radius:8px; }
+  .toggle-item:hover { background:#f8f9fa; }
+  .upload-ic { font-size:12px; color:var(--text-dim); cursor:pointer; flex-shrink:0; padding:2px 4px; border-radius:4px; }
+  .upload-ic:hover { color:var(--accent); background:var(--accent-dim); }
+  .switch { position:relative; width:32px; height:18px; flex-shrink:0; cursor:pointer; }
+  .switch input { opacity:0; width:0; height:0; position:absolute; }
+  .slider { position:absolute; inset:0; background:#dadce0; border-radius:999px; cursor:pointer; transition:.15s; }
+  .slider::before { content:""; position:absolute; width:14px; height:14px; left:2px; top:2px;
+    background:#fff; border-radius:50%; transition:.15s; box-shadow:0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + .slider { background:#a8c7fa; }
+  .switch input:checked + .slider::before { transform:translateX(14px); background:var(--accent); }
+  .toggle-item .cnt { margin-left:auto; color:var(--text-dim); font-size:10.5px; }
   .pct-chip.active { background:var(--accent); color:#fff; }
   .pct-chip:hover:not(.active) { background:#e8eaed; }
   .btn-row { display:flex; gap:6px; margin-bottom:5px; flex-shrink:0; }
@@ -119,16 +134,32 @@
     </div>
 
     <div class="section" id="eth-section">
-      <div class="section-title collapsible" data-target="eth-body"><span>Этносы</span><span class="chevron">▸</span></div>
+      <div class="section-title collapsible" data-target="eth-body"><span>Этносы <span id="eth-selected-count" style="color:var(--accent)"></span></span><span class="chevron">▸</span></div>
       <div class="section-body" id="eth-body" style="display:none;">
-        <div class="hint">Этот фильтр будет добавлен следующим шагом.</div>
+        <div class="mode-row">
+          <div class="mode-btn active" id="mode-or" title="Показать НП, где есть хотя бы один из выбранных">ИЛИ</div>
+          <div class="mode-btn" id="mode-and" title="Показать НП, где есть ВСЕ выбранные одновременно">И</div>
+          <div class="mode-btn" id="mode-dom" title="Показать НП, где выбранный — самый крупный (доминирует)">Больш-во</div>
+          <div class="mode-btn" id="mode-not" title="Показать НП, где выбранного этноса НЕТ вообще">НЕ</div>
+        </div>
+        <input id="eth-search" class="box" placeholder="Поиск этноса…" />
+        <div class="btn-row">
+          <div class="btn-mini" id="select-all">Включить все</div>
+          <div class="btn-mini" id="select-none">Выключить все</div>
+        </div>
+        <div id="eth-list" style="max-height:220px; overflow-y:auto;"></div>
       </div>
     </div>
 
     <div class="section" id="sub-section">
-      <div class="section-title collapsible" data-target="sub-body"><span>Субэтносы (в скобках)</span><span class="chevron">▸</span></div>
+      <div class="section-title collapsible" data-target="sub-body"><span>Субэтносы <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(в скобках)</span></span><span class="chevron">▸</span></div>
       <div class="section-body" id="sub-body" style="display:none;">
-        <div class="hint">Этот фильтр будет добавлен следующим шагом.</div>
+        <input id="sub-search" class="box" placeholder="Поиск субэтноса…" />
+        <div class="btn-row">
+          <div class="btn-mini" id="sub-select-all">Включить все</div>
+          <div class="btn-mini" id="sub-select-none">Выключить все</div>
+        </div>
+        <div id="sub-list" style="max-height:220px; overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -142,17 +173,6 @@
           <input id="pct-to" type="number" min="0" max="100" class="box" style="margin-bottom:0;" placeholder="до %" />
         </div>
         <div class="btn-row"><div class="pct-chip" id="pct-reset">Сбросить</div></div>
-      </div>
-    </div>
-
-    <div class="section" id="flags-section" style="display:none;">
-      <div class="section-title collapsible" data-target="flags-body"><span>Свои флаги</span><span class="chevron">▸</span></div>
-      <div class="section-body" id="flags-body" style="display:none;">
-        <input id="flag-name-input" class="box" placeholder="Название этноса (точно как в данных)" list="flag-name-options" />
-        <datalist id="flag-name-options"></datalist>
-        <input type="file" id="flag-file-input" accept="image/*" class="box" style="padding:8px 10px;" />
-        <div class="btn-row"><div class="btn-mini" id="flag-upload-btn">Загрузить флаг</div></div>
-        <div class="hint" id="flag-upload-status"></div>
       </div>
     </div>
 
@@ -173,6 +193,7 @@
   </div>
   <button id="sidebar-toggle" title="Скрыть/показать панель">‹</button>
   <div id="map"></div>
+  <input type="file" id="flag-file-input" accept="image/*" style="display:none">
 </div>
 
 <script>
@@ -198,23 +219,25 @@ function flagHtmlFor(name, px){
   }
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
 }
-const FLAG_REF_W = 72; // must match the reference width used by ICON_SIZE_EXPR
+const FLAG_MAX_DIM = 72; // cap so huge uploads don't render oversized — real aspect ratio is otherwise kept exactly
 function applyCustomFlagImage(name, url){
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     try{
-      // Uploaded images can be any resolution — always resize down to our standard
-      // reference width first, so icon-size (which assumes a 72px-wide source) renders
-      // it at the correct on-screen size instead of huge (native res) or tiny.
-      const scale = FLAG_REF_W / img.naturalWidth;
-      const w = FLAG_REF_W;
+      // Keep each flag's own true proportions — a real miniature, not squeezed into a shared
+      // box. MapLibre's updateImage() requires an exact size match with whatever was
+      // registered before, which real flags of varying shapes can't guarantee — so instead
+      // we remove any existing image under this name and add a fresh one at its own size.
+      const scale = FLAG_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
       const h = Math.max(1, Math.round(img.naturalHeight * scale));
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
-      if(map.hasImage(name)) map.updateImage(name, canvas); else map.addImage(name, canvas, {pixelRatio:1});
+      if(map.hasImage(name)) map.removeImage(name);
+      map.addImage(name, canvas, {pixelRatio:1});
     }
     catch(err){ console.warn('Не удалось применить кастомный флаг для', name, err); }
   };
@@ -270,17 +293,26 @@ map.addControl(new maplibregl.NavigationControl(), 'top-right');
 // Raster basemap tiles (Esri/OSM) look crisp only at whole zoom levels — at any fractional
 // zoom the GPU has to up/downscale the tile texture, which is exactly the "blurry, as if
 // compressed" look. Leaflet snaps to whole zooms by default; MapLibre doesn't, so we snap
-// it back ourselves once each zoom gesture settles.
+// it back ourselves — but only after the whole gesture has genuinely settled (a continuous
+// scroll/pinch fires many intermediate zoomend events, and snapping on each of those is
+// what caused the visible bounce/rollback while still mid-gesture).
 let snappingZoom = false;
+let zoomSnapTimer = null;
+map.on('zoomstart', () => { if(zoomSnapTimer){ clearTimeout(zoomSnapTimer); zoomSnapTimer = null; } });
 map.on('zoomend', () => {
   if(snappingZoom) return;
-  const z = map.getZoom();
-  const rounded = Math.round(z);
-  if(Math.abs(z - rounded) > 0.02){
-    snappingZoom = true;
-    map.easeTo({ zoom: rounded, duration: 150 });
-    map.once('moveend', () => { snappingZoom = false; });
-  }
+  if(zoomSnapTimer) clearTimeout(zoomSnapTimer);
+  zoomSnapTimer = setTimeout(() => {
+    zoomSnapTimer = null;
+    if(map.isMoving()) return;
+    const z = map.getZoom();
+    const rounded = Math.round(z);
+    if(Math.abs(z - rounded) > 0.02){
+      snappingZoom = true;
+      map.easeTo({ zoom: rounded, duration: 150 });
+      map.once('moveend', () => { snappingZoom = false; });
+    }
+  }, 250);
 });
 
 const POINT_LAYER_IDS = LAYERS.map(L => 'points-layer-'+L);
@@ -379,7 +411,112 @@ document.getElementById('pct-to').addEventListener('input', e => {
 document.getElementById('pct-reset').onclick = () => setPctFilter(null, null, -1, null);
 renderPctPresets();
 
-// ---------- Комбинированный фильтр (страна + % + скрытые/переопределённые в live-слое), применяется ко всем 7 слоям точек ----------
+// ---------- Этносы / Субэтносы: root+sub selections share one flat set PER MODE, exactly
+// like the original — checking a root box and a sub box both just add to the same set for
+// whichever mode (ИЛИ/И/Большинство/НЕ) is currently active. Matching against vector tiles
+// uses the 'eth' property (full JSON text of each NP's ethnicity breakdown) as a substring
+// search — "dom" mode is exact instead, since that property is already pre-parsed. ----------
+let ETH_STATS = { rootPresence:{}, subPresence:{}, rootDominant:{}, subDominant:{} };
+let mode = 'or';
+let selectedOr = new Set(), selectedAnd = new Set(), selectedDom = new Set(), selectedNot = new Set();
+function currentSelected(){
+  if(mode==='or') return selectedOr;
+  if(mode==='and') return selectedAnd;
+  if(mode==='not') return selectedNot;
+  return selectedDom;
+}
+function setMode(m){
+  mode = m;
+  ['mode-or','mode-and','mode-dom','mode-not'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('mode-'+m).classList.add('active');
+  rootList.reset(document.getElementById('eth-search').value);
+  subList.reset(document.getElementById('sub-search').value);
+  updateEthCount();
+  applyFilters();
+}
+document.getElementById('mode-or').onclick = () => setMode('or');
+document.getElementById('mode-and').onclick = () => setMode('and');
+document.getElementById('mode-dom').onclick = () => setMode('dom');
+document.getElementById('mode-not').onclick = () => setMode('not');
+
+function updateEthCount(){
+  const n = currentSelected().size;
+  document.getElementById('eth-selected-count').textContent = n ? `(${n})` : '';
+}
+
+function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countFn){
+  function render(filterQ){
+    const q = (filterQ||'').trim().toLowerCase();
+    const sel = currentSelected();
+    const names = getNames().filter(n => !q || n.toLowerCase().includes(q));
+    listEl.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    names.forEach(name => {
+      const row = document.createElement('div');
+      row.className = 'toggle-item';
+      const checked = sel.has(name);
+      const uploadIcon = isAdmin ? `<span class="upload-ic" title="Загрузить свой флаг для «${name}»">📎</span>` : '';
+      row.innerHTML = `<span class="flag-ic">${flagHtmlFor(name,15)}</span><span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name}</span>${uploadIcon}<span class="cnt">${countFn(name)||0}</span>
+        <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+      if(isAdmin){
+        row.querySelector('.upload-ic').onclick = (ev) => { ev.stopPropagation(); triggerFlagUpload(name); };
+      }
+      const cb = row.querySelector('input');
+      cb.addEventListener('change', (e) => {
+        const s = currentSelected();
+        if(e.target.checked) s.add(name); else s.delete(name);
+        updateEthCount();
+        applyFilters();
+      });
+      frag.appendChild(row);
+    });
+    listEl.appendChild(frag);
+  }
+  searchEl.addEventListener('input', () => render(searchEl.value));
+  document.getElementById(btnAllId).onclick = () => {
+    getNames().forEach(n => currentSelected().add(n));
+    render(searchEl.value); updateEthCount(); applyFilters();
+  };
+  document.getElementById(btnNoneId).onclick = () => {
+    const sel = currentSelected();
+    getNames().forEach(n => sel.delete(n));
+    render(searchEl.value); updateEthCount(); applyFilters();
+  };
+  return { reset: render };
+}
+const rootCountFn = name => mode==='dom' ? (ETH_STATS.rootDominant[name]||0) : (ETH_STATS.rootPresence[name]||0);
+const subCountFn  = name => mode==='dom' ? (ETH_STATS.subDominant[name]||0)  : (ETH_STATS.subPresence[name]||0);
+let allRoots = [], allSubs = [];
+const rootList = buildToggleList(document.getElementById('eth-list'), document.getElementById('eth-search'), 'select-all', 'select-none', () => allRoots, rootCountFn);
+const subList  = buildToggleList(document.getElementById('sub-list'), document.getElementById('sub-search'), 'sub-select-all', 'sub-select-none', () => allSubs, subCountFn);
+
+fetch('eth-stats.json').then(r => r.json()).then(stats => {
+  ETH_STATS = stats;
+  allRoots = Object.keys(stats.rootPresence).sort((a,b) => stats.rootPresence[b]-stats.rootPresence[a]);
+  allSubs = Object.keys(stats.subPresence).sort((a,b) => stats.subPresence[b]-stats.subPresence[a]);
+  rootList.reset(''); subList.reset('');
+}).catch(err => console.error('eth-stats.json недоступен — фильтр по этносам не будет работать', err));
+
+function jstr(s){ return JSON.stringify(String(s)); } // safe embedding of a tag string into a filter expression
+function ethnicityFilterExpr(){
+  const sel = currentSelected();
+  if(sel.size === 0) return null;
+  const tags = [...sel];
+  let expr;
+  if(mode === 'dom'){
+    expr = ['in', ['get','dom'], ['literal', tags]];
+  } else if(mode === 'and'){
+    expr = ['all', ...tags.map(t => ['in', jstr(t), ['get','eth']])];
+  } else if(mode === 'not'){
+    expr = ['all', ...tags.map(t => ['!', ['in', jstr(t), ['get','eth']]])];
+  } else {
+    expr = ['any', ...tags.map(t => ['in', jstr(t), ['get','eth']])];
+  }
+  // Any active ethnicity filter excludes no-data NPs too, matching the original.
+  return ['all', ['!=', ['get','icon'], 'no_data'], expr];
+}
+
+// ---------- Комбинированный фильтр (страна + % + этносы + скрытые/переопределённые в live-слое), применяется ко всем 7 слоям точек ----------
 const hiddenBaselineIds = new Set();
 function applyFilters(){
   const parts = [];
@@ -392,6 +529,8 @@ function applyFilters(){
     if(pctMin != null) parts.push(['>=', ['get','dom_pct'], pctMin]);
     if(pctMax != null) parts.push(['<=', ['get','dom_pct'], pctMax]);
   }
+  const ethExpr = ethnicityFilterExpr();
+  if(ethExpr) parts.push(ethExpr);
   if(hiddenBaselineIds.size) parts.push(['!', ['in', ['get','id'], ['literal', Array.from(hiddenBaselineIds)]]]);
   const filter = parts.length ? ['all', ...parts] : null;
   POINT_LAYER_IDS.forEach(id => map.setFilter(id, filter));
@@ -440,7 +579,9 @@ function openPopupForFeature(f){
   popup.on('close', () => { delete openPopups[p.id]; });
   openPopups[p.id] = popup;
 }
+let dragJustMoved = false; // swallow the click that follows a real drag (matches the original)
 map.on('click', (e) => {
+  if(dragJustMoved){ dragJustMoved = false; return; }
   const layers = isAdmin ? [...POINT_LAYER_IDS, 'live-overlay-layer'] : POINT_LAYER_IDS;
   const feats = map.queryRenderedFeatures(e.point, { layers });
   if(!feats.length){
@@ -452,6 +593,77 @@ map.on('click', (e) => {
 map.on('mouseenter', POINT_LAYER_IDS, () => map.getCanvas().style.cursor = 'pointer');
 map.on('mouseleave', POINT_LAYER_IDS, () => map.getCanvas().style.cursor = '');
 map.on('load', () => loadCustomFlags());
+
+// ---------- Перетаскивание флага мышкой (только в режиме редактора) — зажал прямо на
+// точке и сразу тащишь, без предварительного открытия попапа. Портировано из оригинала
+// (там это была своя логика на canvas поверх mousedown/mousemove/mouseup, поскольку точки
+// не были настоящими draggable-маркерами; здесь та же идея, только hit-test через
+// queryRenderedFeatures вместо ручного расчёта расстояния). ----------
+let dragCandidate = null; // {id, name, startX, startY} — до того, как жест подтверждён как перетаскивание
+let dragActive = null;    // сама точка (объект), которая сейчас реально двигается
+let dragMarker = null;    // временный маркер, визуально следующий за курсором во время перетаскивания
+
+map.on('mousedown', (e) => {
+  if(!isAdmin) return;
+  const layers = [...POINT_LAYER_IDS, 'live-overlay-layer'].filter(id => map.getLayer(id));
+  const feats = map.queryRenderedFeatures(e.point, { layers });
+  if(!feats.length) return;
+  const f = feats[0];
+  const p = f.properties;
+  let eth = [];
+  try { eth = JSON.parse(p.eth || '[]'); } catch(err) {}
+  dragCandidate = {
+    np: { id:p.id, name:p.name, ethnicities:eth, lng:f.geometry.coordinates[0], lat:f.geometry.coordinates[1] },
+    startX: e.point.x, startY: e.point.y,
+  };
+});
+
+map.on('mousemove', (e) => {
+  if(!dragCandidate && !dragActive) return;
+  if(!dragActive){
+    const dx = e.point.x - dragCandidate.startX, dy = e.point.y - dragCandidate.startY;
+    if(Math.hypot(dx, dy) < 4) return; // лёгкое дрожание руки — это ещё не перетаскивание
+    dragActive = dragCandidate.np;
+    dragCandidate = null;
+    map.dragPan.disable();
+    map.getCanvas().style.cursor = 'grabbing';
+    dragMarker = new maplibregl.Marker({ color:'#ea4335' }).setLngLat([dragActive.lng, dragActive.lat]).addTo(map);
+  }
+  dragActive.lng = e.lngLat.lng;
+  dragActive.lat = e.lngLat.lat;
+  dragMarker.setLngLat([dragActive.lng, dragActive.lat]);
+});
+
+map.on('mouseup', async () => {
+  if(!dragActive){ dragCandidate = null; return; }
+  const np = dragActive;
+  dragActive = null;
+  dragJustMoved = true;
+  map.dragPan.enable();
+  map.getCanvas().style.cursor = '';
+  if(dragMarker){ dragMarker.remove(); dragMarker = null; }
+  npCache[np.id] = Object.assign({}, npCache[np.id], np);
+  try{
+    if(np.id.startsWith('s-') && liveById[np.id]){
+      const { error } = await window.supabaseClient.from('settlements').update({ lat: np.lat, lng: np.lng }).eq('id', liveById[np.id].__dbId);
+      if(error) throw error;
+      liveById[np.id] = Object.assign({}, liveById[np.id], { lat:np.lat, lng:np.lng });
+    } else {
+      // подмешиваем к уже существующей правке (если была), чтобы не затереть
+      // сохранённые ранее имя/этносы — только координаты меняем
+      const { data: existing } = await window.supabaseClient.from('edits').select('*').eq('point_id', np.id).maybeSingle();
+      const payload = Object.assign({}, existing || {}, { point_id: np.id, lat: np.lat, lng: np.lng });
+      const { error } = await window.supabaseClient.from('edits').upsert(payload);
+      if(error) throw error;
+      hiddenBaselineIds.add(np.id);
+      liveById[np.id] = Object.assign({ id:np.id, name:np.name, ethnicities:np.ethnicities }, liveById[np.id], { lat:np.lat, lng:np.lng });
+      applyFilters();
+    }
+    rebuildLiveSource();
+  }catch(err){
+    alert('Новое положение не удалось сохранить в базу: ' + (err.message||err));
+  }
+});
 
 // ---------- Поиск / список НП ----------
 let SEARCH_DATA = [];
@@ -542,11 +754,46 @@ function parseEditLines(text){
 
 if(isAdmin){
   document.getElementById('add-np-section').style.display = 'flex';
-  document.getElementById('flags-section').style.display = 'flex';
-  fetch('ethnicity-names.json').then(r => r.json()).then(names => {
-    const dl = document.getElementById('flag-name-options');
-    names.forEach(name => { const opt = document.createElement('option'); opt.value = name; dl.appendChild(opt); });
-  }).catch(err => console.warn('ethnicity-names.json недоступен — автодополнение названий не будет работать', err));
+
+  // ---------- Загрузка своих флагов (значок 📎 в списке «Этносы») ----------
+  const flagFileInput = document.getElementById('flag-file-input');
+  let pendingUploadName = null;
+  window.triggerFlagUpload = function(name){
+    pendingUploadName = name;
+    flagFileInput.value = '';
+    flagFileInput.click();
+  };
+  flagFileInput.addEventListener('change', async () => {
+    const f = flagFileInput.files[0];
+    if(!f || !pendingUploadName) return;
+    const uploadName = pendingUploadName;
+    pendingUploadName = null;
+    // Immediate local feedback (works even before/without Supabase confirming the save)
+    const localUrl = URL.createObjectURL(f);
+    customFlags[uploadName] = localUrl;
+    applyCustomFlagImage(uploadName, localUrl);
+    rebuildLiveSource();
+    rootList.reset(document.getElementById('eth-search').value);
+    subList.reset(document.getElementById('sub-search').value);
+    try{
+      const ext = (f.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      // Storage keys must be ASCII-safe — the (often Cyrillic) ethnicity name is never put
+      // in the file path itself; it's only stored in the "flags" table as the lookup key.
+      const path = `flag-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: upErr } = await window.supabaseClient.storage.from('flags').upload(path, f, { upsert:true });
+      if(upErr) throw upErr;
+      const { data: pub } = window.supabaseClient.storage.from('flags').getPublicUrl(path);
+      const publicUrl = pub.publicUrl;
+      const { error: tableErr } = await window.supabaseClient.from('flags').upsert({ name: uploadName, url: publicUrl });
+      if(tableErr) throw tableErr;
+      customFlags[uploadName] = publicUrl;
+      applyCustomFlagImage(uploadName, publicUrl);
+      rebuildLiveSource();
+    }catch(err){
+      console.warn('Не удалось сохранить флаг в базу — он останется только в этой вкладке:', err);
+      alert('Флаг применился только у вас — не удалось сохранить в базу: ' + (err.message||err));
+    }
+  });
 
   // supabase-js is only loaded when actually needed (admin only) — regular viewers never fetch it
   const sbScript = document.createElement('script');
@@ -649,38 +896,6 @@ function initAdmin(){
     document.getElementById('geo-search').value = '';
     document.getElementById('geo-results').innerHTML = '';
     document.getElementById('manual-coords').value = '';
-  };
-
-  // ---------- Загрузка своих флагов ----------
-  document.getElementById('flag-upload-btn').onclick = async () => {
-    const name = document.getElementById('flag-name-input').value.trim().toLowerCase();
-    const fileInput = document.getElementById('flag-file-input');
-    const statusEl = document.getElementById('flag-upload-status');
-    const f = fileInput.files[0];
-    if(!name){ alert('Введите название этноса — точно как оно записано в данных'); return; }
-    if(!f){ alert('Выберите файл картинки'); return; }
-    statusEl.textContent = 'Загрузка…';
-    try{
-      const ext = (f.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-      // Storage keys must be ASCII-safe — the (often Cyrillic) ethnicity name is never put
-      // in the file path itself; it's only stored in the "flags" table as the lookup key.
-      const path = `flag-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error: upErr } = await window.supabaseClient.storage.from('flags').upload(path, f, { upsert:true });
-      if(upErr) throw upErr;
-      const { data: pub } = window.supabaseClient.storage.from('flags').getPublicUrl(path);
-      const publicUrl = pub.publicUrl;
-      const { error: tableErr } = await window.supabaseClient.from('flags').upsert({ name, url: publicUrl });
-      if(tableErr) throw tableErr;
-      customFlags[name] = publicUrl;
-      applyCustomFlagImage(name, publicUrl);
-      rebuildLiveSource();
-      statusEl.textContent = `Готово — флаг для «${name}» применён.`;
-      fileInput.value = '';
-      document.getElementById('flag-name-input').value = '';
-    }catch(err){
-      statusEl.textContent = '';
-      alert('Не удалось загрузить флаг: ' + (err.message||err));
-    }
   };
 
   // ---------- Первичная загрузка живых данных: новые НП и правки/удаления к существующим ----------
