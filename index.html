@@ -1293,6 +1293,8 @@ function renderEthByCountryList(){
       renderEthByCountryList();
       render(); resetNpList();
     });
+    row.querySelector('.eth-name').style.cursor = 'pointer';
+    row.querySelector('.eth-name').addEventListener('click', () => flyToCountry(name));
     frag.appendChild(row);
   });
   listEl.appendChild(frag);
@@ -1383,6 +1385,7 @@ document.getElementById('country-by-eth-select').addEventListener('change', e =>
   countryByEthFocus = e.target.value;
   countryByEthToggles = new Set();
   document.getElementById('country-by-eth-search').value = '';
+  flyToCountry(countryByEthFocus);
   if(countryByEthFocus){
     DATA.forEach(np => {
       if(countryOf(np) === countryByEthFocus){
@@ -1445,9 +1448,17 @@ fetch('countries.geo.json').then(r => r.json()).then(geo => {
 }).catch(err => {
   console.error('Не удалось загрузить countries.geo.json (фильтр по стране будет недоступен):', err);
 });
+function flyToCountry(name){
+  if(!name || !COUNTRIES) return;
+  const c = COUNTRIES.find(c => c.name_ru === name);
+  if(!c) return;
+  const [minX, minY, maxX, maxY] = c.bbox;
+  map.flyToBounds([[minY, minX], [maxY, maxX]], { padding: [20, 20], duration: 1 });
+}
 document.getElementById('country-select').addEventListener('change', e => {
   selectedCountry = e.target.value;
   document.getElementById('country-active-label').textContent = selectedCountry ? `(${selectedCountry})` : '';
+  flyToCountry(selectedCountry);
   render();
   resetNpList();
 });
