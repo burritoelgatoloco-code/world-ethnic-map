@@ -987,6 +987,8 @@ flagCanvas.addEventListener('click', (e) => {
 // ---------- Drag a flag to move its NP's location (edit mode only) ----------
 let dragCandidate = null; // holds {np, startX, startY} once mousedown happens near a point, before it's confirmed as an actual drag
 let dragActive = null;    // the NP actually being dragged right now
+let dragOrigLat = null, dragOrigLng = null; // its position before the drag, to restore if cancelled
+const MAX_DRAG_PX = 120;  // beyond this it's almost certainly an accidental grab while panning, not a deliberate small nudge
 
 flagCanvas.addEventListener('mousedown', (e) => {
   if(!isAdmin) return;
@@ -1003,8 +1005,20 @@ document.addEventListener('mousemove', (e) => {
     const dx = e.clientX - dragCandidate.startX, dy = e.clientY - dragCandidate.startY;
     if(Math.hypot(dx, dy) < 4) return; // small jitter isn't a drag yet
     dragActive = dragCandidate.np;
+    dragOrigLat = dragActive.lat; dragOrigLng = dragActive.lng;
     map.dragging.disable();
     flagCanvas.style.cursor = 'grabbing';
+  }
+  const totalDx = e.clientX - dragCandidate.startX, totalDy = e.clientY - dragCandidate.startY;
+  if(Math.hypot(totalDx, totalDy) > MAX_DRAG_PX){
+    // Almost certainly an accidental grab while trying to pan the map — cancel the move
+    // entirely rather than dropping the NP somewhere far away by mistake.
+    dragActive.lat = dragOrigLat; dragActive.lng = dragOrigLng;
+    dragActive = null; dragCandidate = null;
+    map.dragging.enable();
+    flagCanvas.style.cursor = '';
+    scheduleRedraw();
+    return;
   }
   const rect = flagCanvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -1171,7 +1185,14 @@ function pointInCountry(lng, lat, country){
   if(lng < country.bbox[0] || lng > country.bbox[2] || lat < country.bbox[1] || lat > country.bbox[3]) return false;
   return country.polys.some(rings => pointInSubPolygon(lng, lat, rings));
 }
+// Manual corrections for specific settlements sitting right on a border, where an automatic
+// point-in-polygon check (even against high-quality boundary data) can reasonably land on
+// the wrong side by a kilometre or two — verified by hand against real-world sources.
+const COUNTRY_OVERRIDES = {"42394,19446": "Черногория", "40693,43735": "Турция", "40874,43670": "Турция", "40964,43614": "Турция", "41222,44853": "Грузия", "55796,27444": "Латвия", "50164,6088": "Люксембург", "43067,22905": "Сербия", "43049,22894": "Сербия", "42964,22770": "Сербия", "42928,22759": "Сербия", "41934,27512": "Турция", "41971,26813": "Турция", "41815,26469": "Турция", "-26259,-53646": "Аргентина", "48142,19492": "Словакия", "48192,19524": "Словакия", "48095,19458": "Словакия", "48064,19057": "Словакия", "47968,18754": "Словакия", "47924,18752": "Словакия", "47884,18755": "Словакия", "47858,18773": "Словакия", "47830,18828": "Словакия", "47778,18646": "Словакия", "47744,22341": "Румыния", "46149,20402": "Румыния", "46154,20110": "Сербия", "45758,18365": "Хорватия", "46527,16522": "Словения", "46538,16506": "Словения", "46619,16405": "Словения", "46629,16384": "Словения", "46831,16321": "Словения", "46860,16191": "Словения", "50411,12923": "Чехия", "50304,12177": "Чехия", "49965,6167": "Люксембург", "49882,6257": "Люксембург", "49852,6320": "Люксембург", "41489,26608": "Турция", "41538,26165": "Болгария", "41410,26158": "Болгария", "39967,20312": "Албания", "41518,41549": "Турция", "41511,41563": "Турция", "41501,41569": "Турция", "41179,44112": "Армения", "41198,44288": "Армения", "41205,44317": "Армения", "41216,44354": "Армения", "41209,44368": "Армения", "41228,44626": "Армения", "31362,35038": "Палестина", "31358,35070": "Палестина", "31361,35079": "Палестина", "29581,34962": "Израиль", "29896,35059": "Израиль", "29942,35064": "Израиль", "29988,35087": "Израиль", "30084,35128": "Израиль", "30491,35166": "Израиль", "30658,35237": "Израиль", "30768,35280": "Израиль", "30933,35378": "Израиль", "54114,72931": "Россия", "51718,60417": "Россия", "50753,59956": "Россия", "51031,56685": "Россия", "50180,47989": "Россия", "46664,48467": "Россия", "40843,67996": "Казахстан", "40864,68027": "Казахстан", "40904,68088": "Казахстан", "40945,68105": "Казахстан", "40948,68077": "Казахстан", "40970,68097": "Казахстан", "40978,68085": "Казахстан", "40985,68077": "Казахстан", "41022,68081": "Казахстан", "40601,68517": "Казахстан", "40604,68554": "Казахстан", "40627,68621": "Казахстан", "40973,68728": "Казахстан", "40986,68731": "Казахстан", "41376,69057": "Казахстан", "41371,69093": "Казахстан", "41394,69094": "Казахстан", "41405,69140": "Казахстан", "41409,69155": "Казахстан", "41466,69432": "Казахстан", "41556,69490": "Казахстан", "41572,69513": "Казахстан", "44891,55982": "Казахстан", "40708,72878": "Киргизия", "39901,71105": "Киргизия", "39909,71209": "Киргизия", "40006,71106": "Киргизия", "39998,71074": "Киргизия", "48837,-94701": "США", "48996,-102551": "США", "49000,-122265": "США", "48994,-122747": "США", "40305,71958": "Узбекистан", "42866,73502": "Казахстан", "42711,71239": "Казахстан", "42934,80486": "Казахстан", "44223,80384": "Казахстан", "44340,80381": "Казахстан", "40896,125969": "КНДР", "41141,126243": "КНДР", "41774,126874": "КНДР", "42164,21176": "Северная Македония", "33271,35623": "Израиль", "33277,35578": "Израиль", "46365,29215": "Украина", "46387,29201": "Украина", "46417,29234": "Украина", "46444,29213": "Украина", "46451,29216": "Украина", "46468,29349": "Украина", "46440,29758": "Украина", "46354,29821": "Украина", "46380,30043": "Украина", "69651,30146": "Россия", "31432,34884": "Израиль", "31478,34926": "Израиль", "31514,34937": "Израиль", "49336,20242": "Словакия", "49384,20360": "Словакия", "49396,20377": "Словакия", "49383,20408": "Словакия", "49391,20407": "Словакия", "49402,20470": "Словакия", "49416,20719": "Словакия", "49364,20755": "Словакия", "49328,20790": "Словакия", "49326,20828": "Словакия", "49339,20851": "Словакия", "49297,20938": "Словакия", "49200,22039": "Словакия", "54384,20647": "Россия", "47119,38217": "Украина", "47277,38317": "Украина", "47462,38286": "Украина", "48675,39687": "Украина", "48683,39711": "Украина", "48858,39962": "Украина", "48906,40026": "Украина", "48904,39794": "Украина", "48948,39751": "Украина", "48978,39741": "Украина", "48995,39692": "Украина", "49376,40142": "Украина", "49389,40098": "Украина", "49750,39448": "Украина", "49737,39345": "Украина", "49852,39202": "Украина", "52184,34041": "Украина", "59380,28179": "Эстония", "50741,81526": "Казахстан", "50952,81404": "Казахстан", "53005,78133": "Казахстан", "53961,76573": "Казахстан", "50972,57302": "Казахстан", "50965,54188": "Казахстан", "51254,53652": "Казахстан", "51461,52966": "Казахстан", "51562,52470": "Казахстан", "50087,48859": "Казахстан", "44900,21547": "Сербия", "45091,21456": "Сербия", "45230,21244": "Сербия", "45286,21168": "Сербия", "45319,21035": "Сербия", "45538,20806": "Сербия", "45664,20794": "Сербия", "45744,20788": "Сербия", "46093,20265": "Сербия", "46112,20254": "Сербия", "47797,25154": "Украина", "48158,26300": "Украина", "48205,26363": "Украина", "48209,26412": "Украина", "48216,26450": "Украина", "48222,26484": "Украина", "48224,26502": "Украина", "48221,26509": "Украина", "48229,26533": "Украина", "48231,26551": "Украина", "48271,26663": "Молдова", "48133,26972": "Молдова", "47643,27329": "Молдова", "45166,19152": "Хорватия", "48088,19432": "Венгрия", "45445,13914": "Хорватия", "45458,13791": "Хорватия", "44590,-75684": "Канада", "44788,-75381": "Канада", "44898,-75183": "Канада", "45008,-72153": "Канада", "40160,70816": "Киргизия", "39997,70624": "Киргизия", "39997,70541": "Киргизия", "39950,70536": "Киргизия", "39959,70507": "Киргизия", "39950,70487": "Киргизия", "39951,70504": "Киргизия", "39962,70482": "Киргизия", "40001,70570": "Киргизия", "40052,70630": "Киргизия", "39714,44664": "Иран", "39748,44624": "Иран", "41646,26477": "Греция", "59114,27806": "Россия", "32487,-114782": "США", "26407,-99084": "США", "26516,-99112": "США", "26534,-99155": "США"};
+function overrideKey(lat, lng){ return Math.round(lat*1000)+','+Math.round(lng*1000); }
 function lookupCountry(lat, lng){
+  const override = COUNTRY_OVERRIDES[overrideKey(lat, lng)];
+  if(override) return override;
   if(!COUNTRIES) return null;
   for(const c of COUNTRIES){
     if(pointInCountry(lng, lat, c)) return c.name_ru;
@@ -1474,6 +1495,11 @@ let pendingCoords = null; // {lat,lng}
 
 // Free geocoder (OpenStreetMap Nominatim, no API key needed)
 let geoTimeout = null;
+// Countries/territories where a newly-added NP's name should keep its native spelling
+// (Suva, not Сува) instead of Nominatim's Russian-translated name — which OSM only has for
+// larger/well-known places, hence "small ones were already fine, big ones weren't".
+const NATIVE_NAME_COUNTRY_CODES = new Set(["au","at","ad","ag","ar","bs","bb","bz","be","bo","bw","br","gb","ve","ht","gy","gt","de","hn","gd","dk","dm","do","ie","is","es","it","cv","ca","co","cr","cu","ls","li","lu","mu","mt","mh","mx","mc","na","nl","ni","nz","no","pa","py","pe","pt","sv","sm","st","sc","vc","kn","lc","us","tt","uy","fj","fr","cl","ch","se","ec","sz","za","jm","gr","cy","ai","bm","vg","gi","ky","ms","pn","sh","tc","fk","gg","je","im","gl","fo","aw","cw","sx","vi","as","pr","mp","bl","mf","pm","pf","nc","bq","gp","yt","mq","re","gf"]);
+
 document.getElementById('geo-search').addEventListener('input', (e) => {
   clearTimeout(geoTimeout);
   const q = e.target.value.trim();
@@ -1481,15 +1507,19 @@ document.getElementById('geo-search').addEventListener('input', (e) => {
   if(q.length < 3){ resultsEl.innerHTML = ''; return; }
   geoTimeout = setTimeout(async () => {
     try{
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(q)}`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=1&namedetails=1&q=${encodeURIComponent(q)}`;
       const res = await fetch(url, { headers: { 'Accept-Language': 'ru' } });
       const items = await res.json();
       resultsEl.innerHTML = '';
       items.forEach(it => {
+        const code = it.address && it.address.country_code;
+        const useNative = code && NATIVE_NAME_COUNTRY_CODES.has(code);
+        const nativeName = it.namedetails && it.namedetails.name;
+        const chosenName = (useNative && nativeName) ? nativeName : it.display_name.split(',')[0];
         const row = document.createElement('div');
         row.className = 'np-item';
         row.innerHTML = `<span class="np-name" title="${it.display_name}">${it.display_name}</span>`;
-        row.onclick = () => selectNewLocation(parseFloat(it.lat), parseFloat(it.lon), it.display_name.split(',')[0]);
+        row.onclick = () => selectNewLocation(parseFloat(it.lat), parseFloat(it.lon), chosenName);
         resultsEl.appendChild(row);
       });
       if(!items.length) resultsEl.innerHTML = '<div class="hint">Ничего не найдено</div>';
