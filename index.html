@@ -240,6 +240,43 @@
       </div>
     </div>
 
+    <div class="section" id="eth-by-country-section">
+      <div class="section-title collapsible" data-target="eth-by-country-body">
+        <span>Этнос → страны <span id="eth-by-country-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="eth-by-country-body" style="display:none;">
+        <select id="eth-by-country-select" class="box" style="margin-bottom:8px;">
+          <option value="">Выберите этнос…</option>
+        </select>
+        <div class="btn-row" id="eth-by-country-actions" style="display:none;">
+          <div class="btn-mini" id="eth-by-country-all">Включить все</div>
+          <div class="btn-mini" id="eth-by-country-none">Выключить все</div>
+          <div class="btn-mini" id="eth-by-country-reset">Сбросить</div>
+        </div>
+        <div id="eth-by-country-list" style="max-height:260px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="section" id="country-by-eth-section">
+      <div class="section-title collapsible" data-target="country-by-eth-body">
+        <span>Страна → этносы <span id="country-by-eth-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="country-by-eth-body" style="display:none;">
+        <select id="country-by-eth-select" class="box" style="margin-bottom:8px;">
+          <option value="">Выберите страну…</option>
+        </select>
+        <input id="country-by-eth-search" class="box" placeholder="Поиск этноса в списке…" style="display:none;" />
+        <div class="btn-row" id="country-by-eth-actions" style="display:none;">
+          <div class="btn-mini" id="country-by-eth-all">Включить все</div>
+          <div class="btn-mini" id="country-by-eth-none">Выключить все</div>
+          <div class="btn-mini" id="country-by-eth-reset">Сбросить</div>
+        </div>
+        <div id="country-by-eth-list" style="max-height:260px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <div id="base-switch">
       <div class="base-switch-btn active" data-base="satellite">Спутник</div>
       <div class="base-switch-btn" data-base="streets">Схема</div>
@@ -671,6 +708,14 @@ function recomputeCounts(){
 }
 recomputeCounts();
 rebuildNpIndex();
+{
+  const sel = document.getElementById('eth-by-country-select');
+  allRoots.slice().sort((a,b) => a.localeCompare(b,'ru')).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+}
 
 // ---------- Filter mode & selection ----------
 let mode = 'or';
@@ -1209,6 +1254,171 @@ function countryVisible(np){
   return countryOf(np) === selectedCountry;
 }
 
+// ---------- Этнос → страны ----------
+let ethByCountryFocus = '';
+let ethByCountryToggles = new Set();
+function ethByCountryVisible(np){
+  if(!ethByCountryFocus) return true;
+  if(dominantRootOf(np) !== ethByCountryFocus) return false;
+  return ethByCountryToggles.has(countryOf(np));
+}
+function renderEthByCountryList(){
+  const listEl = document.getElementById('eth-by-country-list');
+  const actionsEl = document.getElementById('eth-by-country-actions');
+  const labelEl = document.getElementById('eth-by-country-active-label');
+  listEl.innerHTML = '';
+  if(!ethByCountryFocus){ actionsEl.style.display = 'none'; labelEl.textContent = ''; return; }
+  if(!COUNTRIES){ listEl.innerHTML = '<div class="hint">Границы стран ещё загружаются, попробуйте через секунду…</div>'; return; }
+  actionsEl.style.display = 'flex';
+  labelEl.textContent = `(${ethByCountryFocus}: ${ethByCountryToggles.size})`;
+  const countByCountry = {};
+  DATA.forEach(np => {
+    if(dominantRootOf(np) !== ethByCountryFocus) return;
+    const c = countryOf(np);
+    if(c) countByCountry[c] = (countByCountry[c]||0) + 1;
+  });
+  const grandTotal = Object.values(countByCountry).reduce((a,b) => a+b, 0);
+  const countryNames = Object.keys(countByCountry).sort((a,b) => countByCountry[b]-countByCountry[a]);
+  const frag = document.createDocumentFragment();
+  countryNames.forEach(name => {
+    const count = countByCountry[name];
+    const pct = grandTotal ? (count/grandTotal*100).toFixed(1) : '0';
+    const row = document.createElement('div');
+    row.className = 'eth-item';
+    const checked = ethByCountryToggles.has(name);
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+      <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if(e.target.checked) ethByCountryToggles.add(name); else ethByCountryToggles.delete(name);
+      renderEthByCountryList();
+      render(); resetNpList();
+    });
+    frag.appendChild(row);
+  });
+  listEl.appendChild(frag);
+}
+document.getElementById('eth-by-country-select').addEventListener('change', e => {
+  ethByCountryFocus = e.target.value;
+  ethByCountryToggles = new Set();
+  if(ethByCountryFocus){
+    // start with every country that actually has this ethnicity switched ON
+    DATA.forEach(np => {
+      if(dominantRootOf(np) === ethByCountryFocus){
+        const c = countryOf(np);
+        if(c) ethByCountryToggles.add(c);
+      }
+    });
+  }
+  renderEthByCountryList();
+  render(); resetNpList();
+});
+document.getElementById('eth-by-country-all').onclick = () => {
+  DATA.forEach(np => {
+    if(dominantRootOf(np) === ethByCountryFocus){
+      const c = countryOf(np);
+      if(c) ethByCountryToggles.add(c);
+    }
+  });
+  renderEthByCountryList(); render(); resetNpList();
+};
+document.getElementById('eth-by-country-none').onclick = () => {
+  ethByCountryToggles = new Set();
+  renderEthByCountryList(); render(); resetNpList();
+};
+document.getElementById('eth-by-country-reset').onclick = () => {
+  ethByCountryFocus = '';
+  ethByCountryToggles = new Set();
+  document.getElementById('eth-by-country-select').value = '';
+  renderEthByCountryList(); render(); resetNpList();
+};
+
+// ---------- Страна → этносы ----------
+let countryByEthFocus = '';
+let countryByEthToggles = new Set();
+function countryByEthVisible(np){
+  if(!countryByEthFocus) return true;
+  if(countryOf(np) !== countryByEthFocus) return false;
+  return countryByEthToggles.has(dominantRootOf(np));
+}
+function renderCountryByEthList(filterQ){
+  const listEl = document.getElementById('country-by-eth-list');
+  const actionsEl = document.getElementById('country-by-eth-actions');
+  const labelEl = document.getElementById('country-by-eth-active-label');
+  const searchEl = document.getElementById('country-by-eth-search');
+  listEl.innerHTML = '';
+  if(!countryByEthFocus){ actionsEl.style.display = 'none'; searchEl.style.display = 'none'; labelEl.textContent = ''; return; }
+  actionsEl.style.display = 'flex';
+  searchEl.style.display = 'block';
+  labelEl.textContent = `(${countryByEthFocus}: ${countryByEthToggles.size})`;
+  const countByEth = {};
+  let total = 0;
+  DATA.forEach(np => {
+    if(countryOf(np) !== countryByEthFocus) return;
+    total++;
+    const root = dominantRootOf(np);
+    if(root) countByEth[root] = (countByEth[root]||0) + 1;
+  });
+  const q = (filterQ||'').trim().toLowerCase();
+  let ethNames = Object.keys(countByEth).sort((a,b) => countByEth[b]-countByEth[a]);
+  if(q) ethNames = ethNames.filter(n => n.toLowerCase().includes(q));
+  const frag = document.createDocumentFragment();
+  ethNames.forEach(name => {
+    const count = countByEth[name];
+    const pct = total ? (count/total*100).toFixed(1) : '0';
+    const row = document.createElement('div');
+    row.className = 'eth-item';
+    const checked = countryByEthToggles.has(name);
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+      <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if(e.target.checked) countryByEthToggles.add(name); else countryByEthToggles.delete(name);
+      renderCountryByEthList(searchEl.value);
+      render(); resetNpList();
+    });
+    frag.appendChild(row);
+  });
+  listEl.appendChild(frag);
+}
+document.getElementById('country-by-eth-select').addEventListener('change', e => {
+  countryByEthFocus = e.target.value;
+  countryByEthToggles = new Set();
+  document.getElementById('country-by-eth-search').value = '';
+  if(countryByEthFocus){
+    DATA.forEach(np => {
+      if(countryOf(np) === countryByEthFocus){
+        const root = dominantRootOf(np);
+        if(root) countryByEthToggles.add(root);
+      }
+    });
+  }
+  renderCountryByEthList('');
+  render(); resetNpList();
+});
+document.getElementById('country-by-eth-search').addEventListener('input', e => renderCountryByEthList(e.target.value));
+document.getElementById('country-by-eth-all').onclick = () => {
+  DATA.forEach(np => {
+    if(countryOf(np) === countryByEthFocus){
+      const root = dominantRootOf(np);
+      if(root) countryByEthToggles.add(root);
+    }
+  });
+  renderCountryByEthList(document.getElementById('country-by-eth-search').value);
+  render(); resetNpList();
+};
+document.getElementById('country-by-eth-none').onclick = () => {
+  countryByEthToggles = new Set();
+  renderCountryByEthList(document.getElementById('country-by-eth-search').value);
+  render(); resetNpList();
+};
+document.getElementById('country-by-eth-reset').onclick = () => {
+  countryByEthFocus = '';
+  countryByEthToggles = new Set();
+  document.getElementById('country-by-eth-select').value = '';
+  document.getElementById('country-by-eth-search').value = '';
+  renderCountryByEthList('');
+  render(); resetNpList();
+};
+
 fetch('countries.geo.json').then(r => r.json()).then(geo => {
   COUNTRIES = geo.features.map(f => {
     const polys = ringsFromGeometry(f.geometry);
@@ -1226,6 +1436,12 @@ fetch('countries.geo.json').then(r => r.json()).then(geo => {
     opt.value = name; opt.textContent = name;
     select.appendChild(opt);
   });
+  const countryByEthSelect = document.getElementById('country-by-eth-select');
+  names.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    countryByEthSelect.appendChild(opt);
+  });
 }).catch(err => {
   console.error('Не удалось загрузить countries.geo.json (фильтр по стране будет недоступен):', err);
 });
@@ -1240,6 +1456,8 @@ function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
   if(!pctVisible(np)) return false;
   if(!countryVisible(np)) return false;
+  if(!ethByCountryVisible(np)) return false;
+  if(!countryByEthVisible(np)) return false;
   if(np.ethnicities.length === 0){
     // NPs with no ethnicity data at all show up while just browsing (deliberately empty,
     // pending research), but drop out the moment an actual ethnicity filter is applied —
