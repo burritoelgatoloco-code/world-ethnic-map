@@ -456,7 +456,8 @@ async function initMap(){
         extraSettlements.forEach(row => {
           DATA.push({
             lat: row.lat, lng: row.lng, name: row.name,
-            ethnicities: row.ethnicities || [], layer: row.layer || 1, __dbId: row.id, id: 's-'+row.id
+            ethnicities: row.ethnicities || [], layer: row.layer || 1, __dbId: row.id, id: 's-'+row.id,
+            country: row.country || null
           });
         });
       }
@@ -477,6 +478,7 @@ async function initMap(){
           if(row.ethnicities != null) np.ethnicities = row.ethnicities;
           if(row.lat != null) np.lat = row.lat;
           if(row.lng != null) np.lng = row.lng;
+          if(row.country != null) np.country = row.country;
         });
         if(deletedIds.size){
           for(let i = DATA.length - 1; i >= 0; i--){
@@ -1287,6 +1289,7 @@ function lookupCountry(lat, lng){
   return bestName;
 }
 function countryOf(np){
+  if(np.country) return np.country; // manual override, set by you in the edit form — always wins
   if(np.__country !== undefined) return np.__country;
   const override = findOverrideCountry(np);
   if(override){ np.__country = override; return override; }
@@ -1624,6 +1627,12 @@ function editFormHtml(np){
     <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); saveEditNp('${np.id}');}">
     <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); saveEditNp('${np.id}');}">${descText}</textarea>
     <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Enter — сохранить, Shift+Enter — новая строка.</div>
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+      <input class="box" id="edit-country" list="edit-country-options" placeholder="Страна (начните печатать)…" value="${(np.country||'').replace(/"/g,'&quot;')}" style="margin-bottom:0;">
+      <span class="pop-icon" title="Сбросить — определять автоматически" onclick="document.getElementById('edit-country').value=''">✕</span>
+    </div>
+    <datalist id="edit-country-options">${(COUNTRIES||[]).map(c => `<option value="${c.name_ru}">`).join('')}</datalist>
+    <div class="hint" style="margin-bottom:6px;">Страна определяется автоматически по границам — впишите здесь, только если карта ошиблась именно для этой точки. Пустое поле — снова автоматически.</div>
     <div class="btn-row">
       <div class="btn-mini" onclick="cancelEditNp('${np.id}')">Отмена</div>
       <div class="btn-mini" style="background:var(--accent); color:#fff;" onclick="saveEditNp('${np.id}')">Сохранить</div>
@@ -1676,8 +1685,12 @@ window.saveEditNp = async function(id){
   const newName = document.getElementById('edit-name').value.trim() || np.name;
   const newDesc = document.getElementById('edit-desc').value;
   const newEth = parseEditLines(newDesc);
+  const countryInput = document.getElementById('edit-country').value.trim();
+  const validCountry = countryInput && COUNTRIES && COUNTRIES.some(c => c.name_ru === countryInput) ? countryInput : null;
   np.name = newName;
   np.ethnicities = newEth;
+  np.country = validCountry; // manual override — null clears it back to automatic detection
+  delete np.__country; // drop any cached automatic guess so countryOf() re-evaluates cleanly
   recomputeCounts();
   rootList.reset(document.getElementById('eth-search').value);
   subList.reset(document.getElementById('sub-search').value);
@@ -1688,12 +1701,12 @@ window.saveEditNp = async function(id){
   try{
     let error;
     if(id.startsWith('s-') && np.__dbId != null){
-      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth }).eq('id', np.__dbId));
+      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth, country: validCountry }).eq('id', np.__dbId));
     } else {
       // merge with any existing edit row first, so this doesn't wipe out a position
       // (lat/lng) you may have already saved for this point by dragging it earlier
       const { data: existing } = await supabaseClient.from('edits').select('*').eq('point_id', id).maybeSingle();
-      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth });
+      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth, country: validCountry });
       ({ error } = await supabaseClient.from('edits').upsert(payload));
     }
     if(error) throw error;
