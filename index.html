@@ -447,6 +447,16 @@ async function initMap(){
         extraFlags.forEach(row => { customFlags[row.name] = row.url; });
       }
     }catch(err){ console.warn('Не удалось загрузить кастомные флаги:', err); }
+
+    // custom_layers is just as tiny/cosmetic (layer number -> its display name) — the NPs
+    // themselves are baked into data_layerN.json, not stored here. Fetching it for everyone
+    // means a baked custom layer shows its real name instead of a generic "Слой N" fallback.
+    try{
+      const extraLayers = await fetchAllRows('custom_layers');
+      if(extraLayers.length){
+        extraLayers.forEach(row => { LAYER_NAMES[row.number] = row.name; customLayerNumbers.push(row.number); });
+      }
+    }catch(err){ console.warn('Не удалось загрузить имена доп. слоёв:', err); }
   }
 
   if(isAdmin && supabaseClient){
@@ -460,10 +470,6 @@ async function initMap(){
             country: row.country || null
           });
         });
-      }
-      const extraLayers = await fetchAllRows('custom_layers');
-      if(extraLayers.length){
-        extraLayers.forEach(row => { LAYER_NAMES[row.number] = row.name; customLayerNumbers.push(row.number); });
       }
       const extraEdits = await fetchAllRows('edits');
       if(extraEdits.length){
@@ -492,10 +498,14 @@ async function initMap(){
   }
 
 // ---------- Layers (including any custom layers added later, loaded from Supabase) ----------
-let LAYER_NUMBERS = [1,2,3,4,5,6, ...customLayerNumbers];
-let enabledLayers = new Set(LAYER_NUMBERS);
 const layerCounts = {};
 DATA.forEach(np => { layerCounts[np.layer] = (layerCounts[np.layer]||0)+1; });
+// Union of the base 6 layers, any layer numbers actually present in the loaded NP data
+// (this is what makes a baked custom layer like #7 show up for regular viewers too, not
+// just the editor — they never fetch custom_layers from Supabase to learn it exists), and
+// customLayerNumbers (covers a brand-new admin-created layer that has zero baked points yet).
+let LAYER_NUMBERS = [...new Set([1,2,3,4,5,6, ...customLayerNumbers, ...Object.keys(layerCounts).map(Number)])].sort((a,b)=>a-b);
+let enabledLayers = new Set(LAYER_NUMBERS);
 const layersListEl = document.getElementById('layers-list');
 
 function renderLayersList(){
