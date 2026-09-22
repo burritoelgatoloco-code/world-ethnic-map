@@ -161,6 +161,16 @@
       </div>
     </div>
 
+    <div class="section" id="visits-stats-section" style="padding-bottom:6px; display:none;">
+      <div class="section-title collapsible" data-target="visits-stats-body">
+        <span>Статистика посещений <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(видно только вам)</span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="visits-stats-body" style="display:none;">
+        <div id="visits-stats-content" class="hint">Загрузка…</div>
+      </div>
+    </div>
+
     <div class="section" id="np-section">
       <div class="section-title collapsible" data-target="np-body">
         <span>Населённые пункты <span id="np-count" style="color:var(--accent)"></span></span>
@@ -313,6 +323,84 @@ const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_KEY)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
+// ---------- Lightweight visit tracking (table "page_visits") ----------
+// Unlike settlements/edits, this runs for EVERY visitor, editor or not — it's the
+// opposite of what the rest of this file avoids for regular viewers. The reason
+// settlements/edits are admin-only is that they're a big dataset (thousands of rows,
+// megabytes) that would multiply Supabase bandwidth with Telegram-driven traffic; a
+// single tiny visit row (tens of bytes) is a completely different weight class and is
+// exactly what Supabase's free tier is fine with. Wrapped defensively throughout so a
+// tracking failure (offline, ad-blocker, rate-limited geolocation, etc.) can never
+// break the map itself.
+(function trackVisit(){
+  if(!supabaseClient) return;
+  try{
+    let visitorId = localStorage.getItem('ethmap_visitor_id');
+    if(!visitorId){
+      visitorId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now()+'-'+Math.random().toString(36).slice(2));
+      localStorage.setItem('ethmap_visitor_id', visitorId);
+    }
+
+    const startedAt = Date.now();
+    let visitRowId = null;
+    function currentDuration(){ return Math.round((Date.now() - startedAt) / 1000); }
+
+    // Raw REST fetch (not the supabase-js client) so we can set `keepalive: true` on the
+    // final beacon-like updates — that's what lets the request actually leave the browser
+    // when the tab is being closed/hidden, which fetch calls otherwise can't guarantee.
+    async function patchVisit(fields, useKeepalive){
+      if(!visitRowId) return;
+      try{
+        await fetch(`${SUPABASE_URL}/rest/v1/page_visits?id=eq.${visitRowId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify(fields),
+          keepalive: !!useKeepalive
+        });
+      }catch(err){ /* best-effort only */ }
+    }
+
+    (async () => {
+      let geo = {};
+      try{
+        // Best-effort IP geolocation — never blocks/delays recording the visit itself.
+        const r = await fetch('https://ipwho.is/');
+        const j = await r.json();
+        if(j && j.success !== false){
+          geo = { country: j.country || null, country_code: j.country_code || null, city: j.city || null };
+        }
+      }catch(err){ /* geolocation API down/rate-limited — visit still gets recorded */ }
+
+      const { data, error } = await supabaseClient.from('page_visits')
+        .insert({ visitor_id: visitorId, ...geo })
+        .select('id').single();
+      if(error || !data) return;
+      visitRowId = data.id;
+
+      // Keep duration climbing for long sessions even if the tab is never closed
+      // cleanly — only while the tab is actually in the foreground.
+      setInterval(() => {
+        if(document.visibilityState === 'visible'){
+          patchVisit({ last_seen_at: new Date().toISOString(), duration_seconds: currentDuration() }, false);
+        }
+      }, 25000);
+      document.addEventListener('visibilitychange', () => {
+        if(document.visibilityState === 'hidden'){
+          patchVisit({ last_seen_at: new Date().toISOString(), duration_seconds: currentDuration() }, true);
+        }
+      });
+      window.addEventListener('pagehide', () => {
+        patchVisit({ last_seen_at: new Date().toISOString(), duration_seconds: currentDuration() }, true);
+      });
+    })();
+  }catch(err){ /* tracking must never break the map */ }
+})();
+
 function flagFor(name){
   if(FLAG_MAP[name]) return FLAG_MAP[name];
   const base = name.replace(/\s*\(.*?\)\s*/g,'').trim();
@@ -329,6 +417,73 @@ function flagHtmlFor(name, px){
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
 }
 function cap(s){ return s.length ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+function formatDuration(sec){
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if(h) return `${h}ч ${m}м`;
+  if(m) return `${m}м ${s}с`;
+  return `${s}с`;
+}
+
+async function loadVisitStats(){
+  const el = document.getElementById('visits-stats-content');
+  if(!el || !supabaseClient) return;
+  el.textContent = 'Загрузка…';
+  let rows;
+  try{
+    rows = await fetchAllRows('page_visits');
+  }catch(err){
+    el.textContent = 'Не удалось загрузить статистику.';
+    return;
+  }
+  if(!rows.length){ el.textContent = 'Пока нет данных о посещениях.'; return; }
+
+  const now = Date.now(), dayMs = 86400000;
+  const inLast = (days, ts) => (now - new Date(ts).getTime()) <= days*dayMs;
+
+  let html = '';
+
+  // ---- opens / unique visitors, by period (including all-time) ----
+  html += '<table style="width:100%; border-collapse:collapse; margin-bottom:10px; font-size:12px;">';
+  html += '<tr style="color:var(--text-dim);"><td></td><td style="text-align:right;">Открытий</td><td style="text-align:right;">Уникальных</td></tr>';
+  [['Сегодня',1], ['7 дней',7], ['30 дней',30], ['Всего',Infinity]].forEach(([label, days]) => {
+    const subset = days === Infinity ? rows : rows.filter(r => inLast(days, r.started_at));
+    const uniq = new Set(subset.map(r => r.visitor_id)).size;
+    html += `<tr><td>${label}</td><td style="text-align:right;">${subset.length}</td><td style="text-align:right;">${uniq}</td></tr>`;
+  });
+  html += '</table>';
+
+  // ---- time on map: aggregate + average ----
+  const totalSeconds = rows.reduce((s,r) => s + (r.duration_seconds||0), 0);
+  html += `<div style="margin-bottom:10px;">Суммарное время на карте: <b>${formatDuration(totalSeconds)}</b><br>Среднее время за сессию: <b>${formatDuration(totalSeconds/rows.length)}</b></div>`;
+
+  // ---- by country/city ----
+  const byLoc = {};
+  rows.forEach(r => {
+    const key = (r.country || '—') + (r.city ? ', '+r.city : '');
+    byLoc[key] = (byLoc[key]||0) + 1;
+  });
+  html += '<div class="hint" style="margin-bottom:4px;">По странам и городам:</div>';
+  html += '<div style="max-height:160px; overflow-y:auto; margin-bottom:10px;">';
+  Object.entries(byLoc).sort((a,b) => b[1]-a[1]).forEach(([loc,count]) => {
+    html += `<div style="display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid var(--panel-border);"><span>${loc}</span><span style="color:var(--accent);">${count}</span></div>`;
+  });
+  html += '</div>';
+
+  // ---- per-session log (each visitor separately) ----
+  const recent = rows.slice().sort((a,b) => new Date(b.started_at)-new Date(a.started_at)).slice(0, 300);
+  html += `<div class="hint" style="margin-bottom:4px;">Последние сессии (${recent.length} из ${rows.length}):</div>`;
+  html += '<div style="max-height:240px; overflow-y:auto;">';
+  recent.forEach(r => {
+    const dateStr = new Date(r.started_at).toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+    const loc = (r.country || '—') + (r.city ? ', '+r.city : '');
+    html += `<div style="display:flex; gap:6px; padding:2px 0; border-bottom:1px solid var(--panel-border); font-size:12px;"><span style="color:var(--text-dim); flex:0 0 auto;">${dateStr}</span><span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${loc}</span><span style="flex:0 0 auto;">${formatDuration(r.duration_seconds)}</span></div>`;
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
 
 function parseTag(part){
   const m = part.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
@@ -434,6 +589,8 @@ async function initMap(){
       isAdmin = true;
       document.getElementById('layers-section').style.display = 'flex';
       document.getElementById('add-np-section').style.display = 'flex';
+      document.getElementById('visits-stats-section').style.display = 'flex';
+      loadVisitStats();
     }
   }catch(err){ /* ignore — just stays in read-only view */ }
 
