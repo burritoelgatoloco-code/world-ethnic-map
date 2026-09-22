@@ -161,16 +161,6 @@
       </div>
     </div>
 
-    <div class="section" id="visits-stats-section" style="padding-bottom:6px; display:none;">
-      <div class="section-title collapsible" data-target="visits-stats-body">
-        <span>Статистика посещений <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(видно только вам)</span></span>
-        <span class="chevron">▸</span>
-      </div>
-      <div class="section-body" id="visits-stats-body" style="display:none;">
-        <div id="visits-stats-content" class="hint">Загрузка…</div>
-      </div>
-    </div>
-
     <div class="section" id="np-section">
       <div class="section-title collapsible" data-target="np-body">
         <span>Населённые пункты <span id="np-count" style="color:var(--accent)"></span></span>
@@ -295,11 +285,22 @@
       <div class="base-switch-btn" data-base="terrain">Рельеф</div>
     </div>
 
+    <div class="section" id="visits-stats-section" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--panel-border); padding-bottom:6px; display:none;">
+      <div class="section-title collapsible" data-target="visits-stats-body">
+        <span>Статистика посещений <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(видно только вам)</span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="visits-stats-body" style="display:none;">
+        <div id="visits-stats-content" class="hint">Загрузка…</div>
+      </div>
+    </div>
+
     <div id="stats"></div>
   </div>
   <button id="sidebar-toggle" title="Скрыть/показать панель">‹</button>
   <div id="map"></div>
   <input type="file" id="flag-file-input" accept="image/*" style="display:none">
+
 </div>
 
 <script>
