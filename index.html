@@ -324,6 +324,23 @@ const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_KEY)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
+// Top-level (not inside initMap) so trackVisit below — which fires immediately, before
+// initMap even starts — can also check admin status, to skip counting your own visits.
+const ADMIN_SECRET = 'ethnic2026'; // change this string (and your bookmarked link) if you want a new secret
+const isAdminVisit = (() => {
+  try{ return new URLSearchParams(window.location.search).get('edit') === ADMIN_SECRET; }
+  catch(err){ return false; }
+})();
+// Once the admin link has been opened on this device even once, remember that this
+// browser is yours — so it also gets excluded from tracking on plain viewer-link visits
+// (no ?edit=) from then on, without needing your IP or anything else identifying.
+const isOwnerDevice = (() => {
+  try{
+    if(isAdminVisit) localStorage.setItem('ethmap_owner', '1');
+    return localStorage.getItem('ethmap_owner') === '1';
+  }catch(err){ return isAdminVisit; }
+})();
+
 // ---------- Lightweight visit tracking (table "page_visits") ----------
 // Unlike settlements/edits, this runs for EVERY visitor, editor or not — it's the
 // opposite of what the rest of this file avoids for regular viewers. The reason
@@ -334,7 +351,7 @@ const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_KEY)
 // tracking failure (offline, ad-blocker, rate-limited geolocation, etc.) can never
 // break the map itself.
 (function trackVisit(){
-  if(!supabaseClient) return;
+  if(!supabaseClient || isOwnerDevice) return;
   try{
     let visitorId = localStorage.getItem('ethmap_visitor_id');
     if(!visitorId){
@@ -459,18 +476,22 @@ async function loadVisitStats(){
   const totalSeconds = rows.reduce((s,r) => s + (r.duration_seconds||0), 0);
   html += `<div style="margin-bottom:10px;">Суммарное время на карте: <b>${formatDuration(totalSeconds)}</b><br>Среднее время за сессию: <b>${formatDuration(totalSeconds/rows.length)}</b></div>`;
 
-  // ---- by country/city ----
+  // ---- by country/city: opens AND unique visitors, same shape as the periods table ----
   const byLoc = {};
   rows.forEach(r => {
     const key = (r.country || '—') + (r.city ? ', '+r.city : '');
-    byLoc[key] = (byLoc[key]||0) + 1;
+    if(!byLoc[key]) byLoc[key] = { opens: 0, visitors: new Set() };
+    byLoc[key].opens++;
+    byLoc[key].visitors.add(r.visitor_id);
   });
   html += '<div class="hint" style="margin-bottom:4px;">По странам и городам:</div>';
-  html += '<div style="max-height:160px; overflow-y:auto; margin-bottom:10px;">';
-  Object.entries(byLoc).sort((a,b) => b[1]-a[1]).forEach(([loc,count]) => {
-    html += `<div style="display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid var(--panel-border);"><span>${loc}</span><span style="color:var(--accent);">${count}</span></div>`;
+  html += '<div style="max-height:180px; overflow-y:auto; margin-bottom:10px;">';
+  html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
+  html += '<tr style="color:var(--text-dim);"><td></td><td style="text-align:right;">Открытий</td><td style="text-align:right;">Уникальных</td></tr>';
+  Object.entries(byLoc).sort((a,b) => b[1].opens-a[1].opens).forEach(([loc,stat]) => {
+    html += `<tr style="border-bottom:1px solid var(--panel-border);"><td>${loc}</td><td style="text-align:right;">${stat.opens}</td><td style="text-align:right; color:var(--accent);">${stat.visitors.size}</td></tr>`;
   });
-  html += '</div>';
+  html += '</table></div>';
 
   // ---- per-session log (each visitor separately) ----
   const recent = rows.slice().sort((a,b) => new Date(b.started_at)-new Date(a.started_at)).slice(0, 300);
@@ -582,7 +603,6 @@ async function initMap(){
   // Determined here, early, because it now also gates whether Supabase gets contacted at
   // all — regular viewers must never hit it (that's the whole point of baking NPs into the
   // static per-layer files instead), only the editor should see live/unbaked changes. ----------
-  const ADMIN_SECRET = 'ethnic2026'; // change this string (and your bookmarked link) if you want a new secret
   let isAdmin = false;
   try{
     const params = new URLSearchParams(window.location.search);
@@ -625,7 +645,7 @@ async function initMap(){
           DATA.push({
             lat: row.lat, lng: row.lng, name: row.name,
             ethnicities: row.ethnicities || [], layer: row.layer || 1, __dbId: row.id, id: 's-'+row.id,
-            country: row.country || null
+            country: row.country || null, notes: row.notes || null
           });
         });
       }
@@ -643,6 +663,7 @@ async function initMap(){
           if(row.lat != null) np.lat = row.lat;
           if(row.lng != null) np.lng = row.lng;
           if(row.country != null) np.country = row.country;
+          if(row.notes != null) np.notes = row.notes;
         });
         if(deletedIds.size){
           for(let i = DATA.length - 1; i >= 0; i--){
@@ -800,8 +821,8 @@ document.getElementById('bulk-import-file').addEventListener('change', async (e)
     const lng = parseFloat(m[1]), lat = parseFloat(m[2]);
     if(isNaN(lat) || isNaN(lng)) return;
     const name = (r[1]||'').trim() || '(без названия)';
-    const ethnicities = parseEditLines(r[2]||'');
-    parsed.push({ lat, lng, name, ethnicities });
+    const { ethnicities, notes } = parseEditLines(r[2]||'');
+    parsed.push({ lat, lng, name, ethnicities, notes });
   });
   if(!parsed.length){
     statusEl.textContent = 'Не нашёл ни одной точки в этом файле (проверьте, что это тот же формат — WKT,название,описание).';
@@ -827,7 +848,7 @@ document.getElementById('bulk-import-file').addEventListener('change', async (e)
   render();
   if(supabaseClient){
     try{
-      const payload = parsed.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, ethnicities: p.ethnicities, layer: p.layer }));
+      const payload = parsed.map(p => ({ lat: p.lat, lng: p.lng, name: p.name, ethnicities: p.ethnicities, layer: p.layer, notes: p.notes || null }));
       const { data: inserted, error } = await supabaseClient.from('settlements').insert(payload).select();
       if(error) throw error;
       if(inserted){
@@ -854,20 +875,41 @@ let allRootsByDom=[], allSubsByDom=[];
 
 function recomputeCounts(){
   rootPresence={}; subPresence={}; rootDominant={}; subDominant={};
+
+  // A name that appears in parentheses ANYWHERE in the dataset is a subethnicity by
+  // definition — even if the very same name was also, somewhere else, mistakenly typed
+  // as a bare top-level entry with no parent (e.g. "...,меннониты,..." instead of the
+  // usual "немцы (меннониты)"). Without this, that one stray line makes the name leak
+  // into the root list too, so it ends up with two competing checkboxes (one in
+  // "Народы", one in "Субэтносы") fighting over the same NPs. Folding every occurrence
+  // into the sub bucket keeps it as exactly one checkbox, in "Субэтносы" only.
+  const knownSubs = new Set();
+  DATA.forEach(np => {
+    np.ethnicities.forEach(e => tagsOf(e.name).forEach(t => t.subs.forEach(sub => knownSubs.add(sub))));
+  });
+
   DATA.forEach(np => {
     if(!enabledLayers.has(np.layer)) return;
     const allT = [];
     np.ethnicities.forEach(e => allT.push(...tagsOf(e.name)));
     const seenR=new Set(), seenS=new Set();
     allT.forEach(t => {
-      if(!seenR.has(t.root)){ rootPresence[t.root]=(rootPresence[t.root]||0)+1; seenR.add(t.root); }
+      if(knownSubs.has(t.root)){
+        if(!seenS.has(t.root)){ subPresence[t.root]=(subPresence[t.root]||0)+1; seenS.add(t.root); }
+      } else if(!seenR.has(t.root)){
+        rootPresence[t.root]=(rootPresence[t.root]||0)+1; seenR.add(t.root);
+      }
       t.subs.forEach(sub => { if(!seenS.has(sub)){ subPresence[sub]=(subPresence[sub]||0)+1; seenS.add(sub); } });
     });
     if(np.ethnicities.length){
       const domT = tagsOf(dominantEntryOf(np).name);
       const seenDR=new Set(), seenDS=new Set();
       domT.forEach(t => {
-        if(!seenDR.has(t.root)){ rootDominant[t.root]=(rootDominant[t.root]||0)+1; seenDR.add(t.root); }
+        if(knownSubs.has(t.root)){
+          if(!seenDS.has(t.root)){ subDominant[t.root]=(subDominant[t.root]||0)+1; seenDS.add(t.root); }
+        } else if(!seenDR.has(t.root)){
+          rootDominant[t.root]=(rootDominant[t.root]||0)+1; seenDR.add(t.root);
+        }
         t.subs.forEach(sub => { if(!seenDS.has(sub)){ subDominant[sub]=(subDominant[sub]||0)+1; seenDS.add(sub); } });
       });
     }
@@ -1788,20 +1830,30 @@ function popupHtml(np){
   }
   const domRoot = dominantRootOf(np);
   const lines = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : `${e.name}`);
+  const notesHtml = np.notes ? `<div class="hint" style="margin-top:6px; white-space:pre-wrap;">${np.notes.replace(/</g,'&lt;')}</div>` : '';
   return `<div class="eth-popup">
     <div class="ph"><span class="flag-ic">${domRoot?flagHtmlFor(domRoot,18):'🏳️'}</span><h3>${np.name}</h3></div>
     <div class="plain">${lines.join('\n')}</div>
+    ${notesHtml}
     ${footer}
   </div>`;
 }
 
-// Parses the plain-text description textarea back into ethnicity entries,
-// mirroring the same "NN% - name" / "NN - name" / bare-name rules used when the
-// original CSVs were first imported.
+// Parses the plain-text description textarea back into ethnicity entries, mirroring
+// the same "NN% - name" / "NN - name" / bare-name rules used when the original CSVs
+// were first imported. A blank line ends the ethnicities list — everything after the
+// FIRST blank line is kept verbatim as a free-text note (e.g. "Всего 13% - филиппинцы")
+// and is never parsed as more ethnicity entries.
 function parseEditLines(text){
+  const rawLines = text.split('\n');
+  let splitAt = rawLines.findIndex(l => l.trim() === '');
+  if(splitAt === -1) splitAt = rawLines.length;
+  const ethLines = rawLines.slice(0, splitAt);
+  const notes = rawLines.slice(splitAt + 1).join('\n').trim() || null;
+
   const pctPctRe = /^(\d+(?:[.,]\d+)?)\s*%\s*-?\s*(.+?)\s*$/;
   const pctNoPctRe = /^(\d+(?:[.,]\d+)?)\s*-\s*(.+?)\s*$/;
-  return text.split('\n').map(l=>l.trim()).filter(Boolean).map(line => {
+  const ethnicities = ethLines.map(l=>l.trim()).filter(Boolean).map(line => {
     let m = line.match(pctPctRe);
     if(!m) m = line.match(pctNoPctRe);
     if(m){
@@ -1811,14 +1863,16 @@ function parseEditLines(text){
     }
     return { pct: null, pct_display: null, name: line.toLowerCase() };
   });
+  return { ethnicities, notes };
 }
 
 function editFormHtml(np){
-  const descText = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n');
+  const descText = np.ethnicities.map(e => e.pct_display != null ? `${e.pct_display}% - ${e.name}` : e.name).join('\n')
+    + (np.notes ? '\n\n' + np.notes : '');
   return `<div class="eth-popup">
     <input class="box" id="edit-name" value="${np.name.replace(/"/g,'&quot;')}" style="margin-bottom:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); saveEditNp('${np.id}');}">
     <textarea class="box" id="edit-desc" style="margin-bottom:8px; font-family:'Consolas','Courier New',monospace; min-height:90px; border-radius:10px;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); saveEditNp('${np.id}');}">${descText}</textarea>
-    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Enter — сохранить, Shift+Enter — новая строка.</div>
+    <div class="hint" style="margin-bottom:6px;">Одна запись на строку: «78% - русские» или просто «русские», если доля неизвестна. Пустая строка — дальше идёт обычный текст-пометка (не этнос), например «Всего 13% - филиппинцы». Enter — сохранить, Shift+Enter — новая строка.</div>
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
       <input class="box" id="edit-country" list="edit-country-options" placeholder="Страна (начните печатать)…" value="${(np.country||'').replace(/"/g,'&quot;')}" style="margin-bottom:0;">
       <span class="pop-icon" title="Сбросить — определять автоматически" onclick="document.getElementById('edit-country').value=''">✕</span>
@@ -1876,11 +1930,12 @@ window.saveEditNp = async function(id){
   if(!np) return;
   const newName = document.getElementById('edit-name').value.trim() || np.name;
   const newDesc = document.getElementById('edit-desc').value;
-  const newEth = parseEditLines(newDesc);
+  const { ethnicities: newEth, notes: newNotes } = parseEditLines(newDesc);
   const countryInput = document.getElementById('edit-country').value.trim();
   const validCountry = countryInput && COUNTRIES && COUNTRIES.some(c => c.name_ru === countryInput) ? countryInput : null;
   np.name = newName;
   np.ethnicities = newEth;
+  np.notes = newNotes;
   np.country = validCountry; // manual override — null clears it back to automatic detection
   delete np.__country; // drop any cached automatic guess so countryOf() re-evaluates cleanly
   recomputeCounts();
@@ -1893,12 +1948,12 @@ window.saveEditNp = async function(id){
   try{
     let error;
     if(id.startsWith('s-') && np.__dbId != null){
-      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth, country: validCountry }).eq('id', np.__dbId));
+      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth, country: validCountry, notes: newNotes }).eq('id', np.__dbId));
     } else {
       // merge with any existing edit row first, so this doesn't wipe out a position
       // (lat/lng) you may have already saved for this point by dragging it earlier
       const { data: existing } = await supabaseClient.from('edits').select('*').eq('point_id', id).maybeSingle();
-      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth, country: validCountry });
+      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth, country: validCountry, notes: newNotes });
       ({ error } = await supabaseClient.from('edits').upsert(payload));
     }
     if(error) throw error;
@@ -2076,9 +2131,9 @@ document.getElementById('new-np-save').onclick = async () => {
   if(!pendingCoords){ return; }
   const name = document.getElementById('new-np-name').value.trim();
   if(!name){ alert('Введите название НП'); return; }
-  const ethnicities = parseEditLines(document.getElementById('new-np-desc').value);
+  const { ethnicities, notes } = parseEditLines(document.getElementById('new-np-desc').value);
   const chosenLayer = parseInt(document.getElementById('new-np-layer').value) || LAYER_NUMBERS[0];
-  const newNp = { lat: pendingCoords.lat, lng: pendingCoords.lng, name, ethnicities, layer: chosenLayer };
+  const newNp = { lat: pendingCoords.lat, lng: pendingCoords.lng, name, ethnicities, notes, layer: chosenLayer };
   DATA.push(newNp);
   layerCounts[chosenLayer] = (layerCounts[chosenLayer] || 0) + 1;
   renderLayersList();
@@ -2092,7 +2147,7 @@ document.getElementById('new-np-save').onclick = async () => {
   if(supabaseClient){
     try{
       const { data: inserted, error } = await supabaseClient.from('settlements').insert({
-        lat: newNp.lat, lng: newNp.lng, name: newNp.name, ethnicities: newNp.ethnicities, layer: newNp.layer
+        lat: newNp.lat, lng: newNp.lng, name: newNp.name, ethnicities: newNp.ethnicities, layer: newNp.layer, notes: newNp.notes
       }).select().single();
       if(error) throw error;
       if(inserted){ newNp.__dbId = inserted.id; newNp.id = 's-'+inserted.id; rebuildNpIndex(); }
