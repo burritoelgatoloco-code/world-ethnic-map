@@ -186,6 +186,23 @@
       </div>
     </div>
 
+    <div class="section" id="regions-section">
+      <div class="section-title collapsible" data-target="regions-body" id="regions-header">
+        <span>Регионы <span id="regions-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="regions-body" style="display:none;">
+        <select id="regions-country-select" class="box" style="margin-bottom:8px;">
+          <option value="">Загрузка регионов…</option>
+        </select>
+        <input id="regions-list-search" class="box" placeholder="Поиск региона…" style="display:none; margin-bottom:8px;" />
+        <div class="btn-row" id="regions-list-btnrow" style="display:none;">
+          <div class="btn-mini" id="regions-list-none">Выключить все</div>
+        </div>
+        <div id="regions-list" style="max-height:260px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <div class="section" id="eth-section">
       <div class="section-title collapsible" data-target="eth-body">
         <span>Этносы <span id="eth-selected-count" style="color:var(--accent)"></span></span>
@@ -257,6 +274,24 @@
           <div class="btn-mini" id="eth-by-country-reset">Сбросить</div>
         </div>
         <div id="eth-by-country-list" style="max-height:260px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="section" id="eth-by-region-section">
+      <div class="section-title collapsible" data-target="eth-by-region-body" id="eth-by-region-header">
+        <span>Этносы по регионам <span id="eth-by-region-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="eth-by-region-body" style="display:none;">
+        <select id="eth-by-region-select" class="box" style="margin-bottom:8px;">
+          <option value="">Загрузка регионов…</option>
+        </select>
+        <div class="btn-row" id="eth-by-region-actions" style="display:none;">
+          <div class="btn-mini" id="eth-by-region-all">Включить все</div>
+          <div class="btn-mini" id="eth-by-region-none">Выключить все</div>
+          <div class="btn-mini" id="eth-by-region-reset">Сбросить</div>
+        </div>
+        <div id="eth-by-region-list" style="max-height:260px; overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -612,6 +647,7 @@ async function initMap(){
       document.getElementById('add-np-section').style.display = 'flex';
       document.getElementById('visits-stats-section').style.display = 'flex';
       loadVisitStats();
+      ensureRegionsLoaded(); // so the edit form's "Регион" autocomplete is ready without an extra click
     }
   }catch(err){ /* ignore — just stays in read-only view */ }
 
@@ -645,7 +681,7 @@ async function initMap(){
           DATA.push({
             lat: row.lat, lng: row.lng, name: row.name,
             ethnicities: row.ethnicities || [], layer: row.layer || 1, __dbId: row.id, id: 's-'+row.id,
-            country: row.country || null, notes: row.notes || null
+            country: row.country || null, notes: row.notes || null, region: row.region || null
           });
         });
       }
@@ -664,6 +700,7 @@ async function initMap(){
           if(row.lng != null) np.lng = row.lng;
           if(row.country != null) np.country = row.country;
           if(row.notes != null) np.notes = row.notes;
+          if(row.region != null) np.region = row.region;
         });
         if(deletedIds.size){
           for(let i = DATA.length - 1; i >= 0; i--){
@@ -920,6 +957,7 @@ function recomputeCounts(){
   allSubsByDom = Object.keys(subPresence).sort((a,b)=> (subDominant[b]||0)-(subDominant[a]||0));
   allTags = allRoots.concat(allSubs);
   syncEthByCountrySelect();
+  syncEthByRegionSelect();
 }
 // "Этносы по странам": same ordering as the "Больш-во" hierarchy (allRootsByDom — sorted by
 // how many NPs each root is the dominant ethnicity in), but ONLY listing roots that currently
@@ -944,6 +982,29 @@ function syncEthByCountrySelect(){
     ethByCountryFocus = '';
     ethByCountryToggles = new Set();
     renderEthByCountryList();
+    render(); resetNpList();
+  }
+}
+// "Этносы по регионам" — identical ethnicity list/ordering as above (regions don't need to be
+// loaded for this dropdown itself, only for actually rendering the region breakdown once one
+// is picked), kept as its own independent select/focus so the two panels don't interfere.
+function syncEthByRegionSelect(){
+  const sel = document.getElementById('eth-by-region-select');
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">Выберите этнос…</option>';
+  const visibleNames = allRootsByDom.filter(name => (rootDominant[name]||0) > 0);
+  visibleNames.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  if(prevValue && visibleNames.includes(prevValue)){
+    sel.value = prevValue;
+  } else if(prevValue){
+    sel.value = '';
+    ethByRegionFocus = '';
+    ethByRegionToggles = new Set();
+    renderEthByRegionList();
     render(); resetNpList();
   }
 }
@@ -1612,6 +1673,90 @@ document.getElementById('eth-by-country-reset').onclick = () => {
   renderEthByCountryList(); render(); resetNpList();
 };
 
+// ---------- Этносы → регионы (как "Этносы по странам", но АТД 1-го уровня сразу по всем
+// странам, где размечены регионы — Черкасская обл, Украина / Омская обл, Россия / и т.д.,
+// от большего к меньшему; регионы, а не сами страны, поэтому ключ — "регион+страна" ----------
+let ethByRegionFocus = '';
+let ethByRegionToggles = new Set(); // keys: "RegionName||CountryName"
+function regionCountryKey(region, country){ return region + '||' + country; }
+function ethByRegionVisible(np){
+  if(!ethByRegionFocus) return true;
+  if(dominantRootOf(np) !== ethByRegionFocus) return false;
+  const r = regionOf(np), c = countryOf(np);
+  if(!r || !c) return false;
+  return ethByRegionToggles.has(regionCountryKey(r, c));
+}
+function selectAllEthByRegion(){
+  DATA.forEach(np => {
+    if(dominantRootOf(np) === ethByRegionFocus){
+      const r = regionOf(np), c = countryOf(np);
+      if(r && c) ethByRegionToggles.add(regionCountryKey(r, c));
+    }
+  });
+}
+function renderEthByRegionList(){
+  const listEl = document.getElementById('eth-by-region-list');
+  const actionsEl = document.getElementById('eth-by-region-actions');
+  const labelEl = document.getElementById('eth-by-region-active-label');
+  listEl.innerHTML = '';
+  if(!ethByRegionFocus){ actionsEl.style.display = 'none'; labelEl.textContent = ''; return; }
+  if(!REGIONS){ listEl.innerHTML = '<div class="hint">Границы регионов ещё загружаются, попробуйте через секунду…</div>'; return; }
+  actionsEl.style.display = 'flex';
+  labelEl.textContent = `(${ethByRegionFocus}: ${ethByRegionToggles.size})`;
+  const byKey = {}; // key -> {region, country, count}
+  DATA.forEach(np => {
+    if(dominantRootOf(np) !== ethByRegionFocus) return;
+    const r = regionOf(np), c = countryOf(np);
+    if(!r || !c) return;
+    const key = regionCountryKey(r, c);
+    (byKey[key] = byKey[key] || { region: r, country: c, count: 0 }).count++;
+  });
+  const grandTotal = Object.values(byKey).reduce((a,b) => a+b.count, 0);
+  const keys = Object.keys(byKey).sort((a,b) => byKey[b].count - byKey[a].count);
+  const frag = document.createDocumentFragment();
+  keys.forEach(key => {
+    const { region, country, count } = byKey[key];
+    const pct = grandTotal ? (count/grandTotal*100).toFixed(1) : '0';
+    const label = `${region}, ${country}`;
+    const row = document.createElement('div');
+    row.className = 'eth-item';
+    const checked = ethByRegionToggles.has(key);
+    row.innerHTML = `<span class="eth-name" title="${label}">${label}</span><span class="eth-count">${count} · ${pct}%</span>
+      <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if(e.target.checked) ethByRegionToggles.add(key); else ethByRegionToggles.delete(key);
+      renderEthByRegionList();
+      render(); resetNpList();
+    });
+    frag.appendChild(row);
+  });
+  listEl.appendChild(frag);
+}
+document.getElementById('eth-by-region-select').addEventListener('change', e => {
+  ethByRegionFocus = e.target.value;
+  ethByRegionToggles = new Set();
+  if(ethByRegionFocus) selectAllEthByRegion();
+  renderEthByRegionList();
+  render(); resetNpList();
+});
+document.getElementById('eth-by-region-all').onclick = () => {
+  selectAllEthByRegion();
+  renderEthByRegionList(); render(); resetNpList();
+};
+document.getElementById('eth-by-region-none').onclick = () => {
+  ethByRegionToggles = new Set();
+  renderEthByRegionList(); render(); resetNpList();
+};
+document.getElementById('eth-by-region-reset').onclick = () => {
+  ethByRegionFocus = '';
+  ethByRegionToggles = new Set();
+  document.getElementById('eth-by-region-select').value = '';
+  renderEthByRegionList(); render(); resetNpList();
+};
+document.getElementById('eth-by-region-header').addEventListener('click', () => {
+  ensureRegionsLoaded().then(() => renderEthByRegionList());
+});
+
 // ---------- Страна → этносы ----------
 let countryByEthFocus = '';
 let countryByEthToggles = new Set();
@@ -1779,11 +1924,140 @@ document.getElementById('country-list-none').onclick = () => {
   render(); resetNpList();
 };
 
+// ---------- Регионы (области/штаты/провинции внутри отдельных стран) ----------
+// A separate, much bigger boundary file (regions.geo.json) than countries.geo.json, and
+// only useful to a minority of visitors, so — unlike countries.geo.json — it is NOT
+// fetched for everyone up front. It loads lazily, once: the first time anyone actually
+// opens the "Регионы" panel, or immediately in editor mode (so the region override field
+// in the edit form has its autocomplete list ready without an extra click).
+let REGIONS = null; // null = not loaded yet; then { 'Россия': [{name_ru, polys, bbox}, ...], ... }
+let regionsLoadPromise = null;
+let selectedRegions = new Set(); // empty = no filter
+function ensureRegionsLoaded(){
+  if(regionsLoadPromise) return regionsLoadPromise;
+  regionsLoadPromise = fetch('regions.geo.json').then(r => r.json()).then(geo => {
+    REGIONS = {};
+    geo.features.forEach(f => {
+      const polys = ringsFromGeometry(f.geometry);
+      const xs = [], ys = [];
+      polys.forEach(rings => rings[0].forEach(([x,y]) => { xs.push(x); ys.push(y); }));
+      const bbox = xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0,0,0,0];
+      const country = f.properties.country;
+      (REGIONS[country] = REGIONS[country] || []).push({ name_ru: f.properties.name_ru, polys, bbox });
+    });
+    populateRegionsCountrySelect();
+  }).catch(err => {
+    console.warn('Не удалось загрузить границы регионов:', err);
+    REGIONS = {}; // treat as "no region data" rather than retrying forever
+  });
+  return regionsLoadPromise;
+}
+function regionOf(np){
+  if(np.region) return np.region; // manual override — always wins, same convention as country
+  if(np.__region !== undefined) return np.__region;
+  if(!REGIONS) return null; // not loaded yet — don't cache
+  const country = countryOf(np);
+  const list = country ? REGIONS[country] : null;
+  if(!list){ np.__region = null; return null; }
+  for(const r of list){
+    if(pointInCountry(np.lng, np.lat, r)){ np.__region = r.name_ru; return np.__region; }
+  }
+  // Same reasoning as the country-level fallback: a point right on a regional border can
+  // miss every polygon by a hair — fall back to whichever of this country's regions is
+  // nearest, rather than leaving it unclassified.
+  let bestName = null, bestDist = Infinity;
+  for(const r of list){
+    const d = pointToCountryDist(np.lng, np.lat, r);
+    if(d < bestDist){ bestDist = d; bestName = r.name_ru; }
+  }
+  np.__region = bestName;
+  return np.__region;
+}
+function regionVisible(np){
+  if(selectedRegions.size === 0) return true;
+  if(!REGIONS) return false;
+  return selectedRegions.has(regionOf(np));
+}
+function updateRegionsActiveLabel(){
+  const n = selectedRegions.size;
+  document.getElementById('regions-active-label').textContent = n ? `(${n})` : '';
+}
+function populateRegionsCountrySelect(){
+  const sel = document.getElementById('regions-country-select');
+  if(!REGIONS) return;
+  const countries = Object.keys(REGIONS).sort((a,b) => a.localeCompare(b, 'ru'));
+  if(!countries.length){
+    sel.innerHTML = '<option value="">Пока нет размеченных стран</option>';
+    return;
+  }
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Выберите страну…</option>' + countries.map(c => `<option value="${c}">${c}</option>`).join('');
+  if(prev && countries.includes(prev)) sel.value = prev;
+}
+function renderRegionsList(filterQ){
+  const listEl = document.getElementById('regions-list');
+  const searchEl = document.getElementById('regions-list-search');
+  const btnRow = document.getElementById('regions-list-btnrow');
+  const country = document.getElementById('regions-country-select').value;
+  listEl.innerHTML = '';
+  if(!country || !REGIONS || !REGIONS[country]){
+    searchEl.style.display = 'none';
+    btnRow.style.display = 'none';
+    return;
+  }
+  searchEl.style.display = '';
+  btnRow.style.display = '';
+  const countByRegion = {};
+  DATA.forEach(np => {
+    if(countryOf(np) !== country) return;
+    const r = regionOf(np);
+    if(r) countByRegion[r] = (countByRegion[r]||0) + 1;
+  });
+  const countryTotal = DATA.filter(np => countryOf(np) === country).length;
+  const q = (filterQ||'').trim().toLowerCase();
+  let names = REGIONS[country].map(r => r.name_ru).filter(n => countByRegion[n]);
+  if(q) names = names.filter(n => n.toLowerCase().includes(q));
+  names.sort((a,b) => (countByRegion[b]||0) - (countByRegion[a]||0));
+  const frag = document.createDocumentFragment();
+  names.forEach(name => {
+    const count = countByRegion[name] || 0;
+    const pct = countryTotal ? (count/countryTotal*100).toFixed(1) : '0';
+    const row = document.createElement('div');
+    row.className = 'eth-item';
+    const checked = selectedRegions.has(name);
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+      <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if(e.target.checked) selectedRegions.add(name); else selectedRegions.delete(name);
+      updateRegionsActiveLabel();
+      render(); resetNpList();
+    });
+    frag.appendChild(row);
+  });
+  listEl.appendChild(frag);
+}
+document.getElementById('regions-country-select').addEventListener('change', () => renderRegionsList(document.getElementById('regions-list-search').value));
+document.getElementById('regions-list-search').addEventListener('input', e => renderRegionsList(e.target.value));
+document.getElementById('regions-list-none').onclick = () => {
+  // only clears regions belonging to the currently shown country, same spirit as other
+  // "выключить все" buttons which act on what's currently on screen
+  const country = document.getElementById('regions-country-select').value;
+  if(REGIONS && REGIONS[country]) REGIONS[country].forEach(r => selectedRegions.delete(r.name_ru));
+  updateRegionsActiveLabel();
+  renderRegionsList(document.getElementById('regions-list-search').value);
+  render(); resetNpList();
+};
+document.getElementById('regions-header').addEventListener('click', () => {
+  ensureRegionsLoaded().then(() => renderRegionsList(document.getElementById('regions-list-search').value));
+});
+
 function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
   if(!pctVisible(np)) return false;
   if(!countryVisible(np)) return false;
+  if(!regionVisible(np)) return false;
   if(!ethByCountryVisible(np)) return false;
+  if(!ethByRegionVisible(np)) return false;
   if(!countryByEthVisible(np)) return false;
   if(np.ethnicities.length === 0){
     // NPs with no ethnicity data at all show up while just browsing (deliberately empty,
@@ -1879,6 +2153,12 @@ function editFormHtml(np){
     </div>
     <datalist id="edit-country-options">${[...new Set((COUNTRIES||[]).map(c => c.name_ru))].sort((a,b) => a.localeCompare(b, 'ru')).map(n => `<option value="${n}">`).join('')}</datalist>
     <div class="hint" style="margin-bottom:6px;">Страна определяется автоматически по границам — впишите здесь, только если карта ошиблась именно для этой точки. Пустое поле — снова автоматически.</div>
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+      <input class="box" id="edit-region" list="edit-region-options" placeholder="Регион (начните печатать)…" value="${(np.region||'').replace(/"/g,'&quot;')}" style="margin-bottom:0;">
+      <span class="pop-icon" title="Сбросить — определять автоматически" onclick="document.getElementById('edit-region').value=''">✕</span>
+    </div>
+    <datalist id="edit-region-options">${REGIONS ? Object.values(REGIONS).flat().map(r => r.name_ru).sort((a,b) => a.localeCompare(b, 'ru')).map(n => `<option value="${n}">`).join('') : ''}</datalist>
+    <div class="hint" style="margin-bottom:6px;">Регион (область/штат/провинция) — пока размечено только для нескольких стран (см. панель «Регионы»). Так же определяется автоматически внутри страны; впишите вручную, если карта промахнулась (например НП из Нью-Джерси попал в Пенсильванию).</div>
     <div class="btn-row">
       <div class="btn-mini" onclick="cancelEditNp('${np.id}')">Отмена</div>
       <div class="btn-mini" style="background:var(--accent); color:#fff;" onclick="saveEditNp('${np.id}')">Сохранить</div>
@@ -1933,11 +2213,15 @@ window.saveEditNp = async function(id){
   const { ethnicities: newEth, notes: newNotes } = parseEditLines(newDesc);
   const countryInput = document.getElementById('edit-country').value.trim();
   const validCountry = countryInput && COUNTRIES && COUNTRIES.some(c => c.name_ru === countryInput) ? countryInput : null;
+  const regionInput = document.getElementById('edit-region').value.trim();
+  const validRegion = regionInput && REGIONS && Object.values(REGIONS).flat().some(r => r.name_ru === regionInput) ? regionInput : null;
   np.name = newName;
   np.ethnicities = newEth;
   np.notes = newNotes;
   np.country = validCountry; // manual override — null clears it back to automatic detection
+  np.region = validRegion;
   delete np.__country; // drop any cached automatic guess so countryOf() re-evaluates cleanly
+  delete np.__region; // country may have just changed too, so any cached region guess is now stale
   recomputeCounts();
   rootList.reset(document.getElementById('eth-search').value);
   subList.reset(document.getElementById('sub-search').value);
@@ -1948,12 +2232,12 @@ window.saveEditNp = async function(id){
   try{
     let error;
     if(id.startsWith('s-') && np.__dbId != null){
-      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth, country: validCountry, notes: newNotes }).eq('id', np.__dbId));
+      ({ error } = await supabaseClient.from('settlements').update({ name: newName, ethnicities: newEth, country: validCountry, notes: newNotes, region: validRegion }).eq('id', np.__dbId));
     } else {
       // merge with any existing edit row first, so this doesn't wipe out a position
       // (lat/lng) you may have already saved for this point by dragging it earlier
       const { data: existing } = await supabaseClient.from('edits').select('*').eq('point_id', id).maybeSingle();
-      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth, country: validCountry, notes: newNotes });
+      const payload = Object.assign({}, existing || {}, { point_id: id, name: newName, ethnicities: newEth, country: validCountry, notes: newNotes, region: validRegion });
       ({ error } = await supabaseClient.from('edits').upsert(payload));
     }
     if(error) throw error;
