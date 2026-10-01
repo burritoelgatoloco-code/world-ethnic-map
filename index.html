@@ -5,6 +5,9 @@
 <title>Этническая карта Земли</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -15,7 +18,7 @@
   }
   * { box-sizing:border-box; }
   html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text);
-    font-family:'Google Sans','Roboto',Arial,system-ui,-apple-system,sans-serif; }
+    font-family:'Roboto',Arial,system-ui,-apple-system,sans-serif; }
   #app { display:flex; height:100vh; width:100vw; position:relative; }
   #sidebar { width:340px; flex-shrink:0; background:var(--panel); box-shadow:2px 0 6px rgba(0,0,0,.12);
     display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; z-index:10;
@@ -84,11 +87,11 @@
   #stats b { color:var(--text); }
 
   #map { flex:1; position:relative; }
-  .eth-popup { min-width:200px; max-width:280px; font-family:'Google Sans','Roboto',Arial,sans-serif; }
+  .eth-popup { min-width:200px; max-width:280px; font-family:'Roboto',Arial,sans-serif; }
   .eth-popup .ph { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .eth-popup .ph .flag-ic { font-size:20px; width:auto; }
   .eth-popup h3 { margin:0; font-size:16px; font-weight:500; color:#202124; }
-  .eth-popup .plain { font-size:14px; line-height:1.7; white-space:pre-line; color:#3c4043; font-family:'Google Sans','Roboto',Arial,sans-serif; }
+  .eth-popup .plain { font-size:14px; line-height:1.7; white-space:pre-line; color:#3c4043; font-family:'Roboto',Arial,sans-serif; }
   .pop-footer { margin-top:10px; padding-top:8px; border-top:1px solid #e8eaed; display:flex; align-items:center; justify-content:space-between; }
   .pop-footer .coords { font-size:11px; color:#5f6368; }
   .pop-footer .pop-actions { display:flex; gap:6px; }
@@ -193,10 +196,10 @@
       </div>
       <div class="section-body" id="regions-body" style="display:none;">
         <select id="regions-country-select" class="box" style="margin-bottom:8px;">
-          <option value="">Загрузка регионов…</option>
+          <option value="">Выберите страну…</option>
         </select>
         <input id="regions-list-search" class="box" placeholder="Поиск региона…" style="display:none; margin-bottom:8px;" />
-        <div class="btn-row" id="regions-list-btnrow" style="display:none;">
+        <div class="btn-row" id="regions-list-actions" style="display:none;">
           <div class="btn-mini" id="regions-list-none">Выключить все</div>
         </div>
         <div id="regions-list" style="max-height:260px; overflow-y:auto;"></div>
@@ -292,6 +295,23 @@
           <div class="btn-mini" id="eth-by-region-reset">Сбросить</div>
         </div>
         <div id="eth-by-region-list" style="max-height:260px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="section" id="region-by-eth-section">
+      <div class="section-title collapsible" data-target="region-by-eth-body" id="region-by-eth-header">
+        <span>Регионы по этносам <span id="region-by-eth-active-label" style="color:var(--accent)"></span></span>
+        <span class="chevron">▸</span>
+      </div>
+      <div class="section-body" id="region-by-eth-body" style="display:none;">
+        <select id="region-by-eth-country-select" class="box" style="margin-bottom:8px;">
+          <option value="">Выберите страну…</option>
+        </select>
+        <input id="region-by-eth-search" class="box" placeholder="Поиск региона…" style="display:none; margin-bottom:8px;" />
+        <div class="btn-row" id="region-by-eth-actions" style="display:none;">
+          <div class="btn-mini" id="region-by-eth-none">Выключить все</div>
+        </div>
+        <div id="region-by-eth-list" style="max-height:260px; overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -1951,13 +1971,12 @@ let regionsManifest = null; // country_ru -> chunk filename
 let manifestLoadPromise = null;
 const loadedChunks = new Set(); // chunk filenames already fetched & merged into REGIONS
 const chunkLoadPromises = {}; // chunk filename -> in-flight/resolved promise
-let selectedRegions = new Set(); // empty = no filter
 
 function ensureManifestLoaded(){
   if(manifestLoadPromise) return manifestLoadPromise;
   manifestLoadPromise = fetch('regions_manifest.json').then(r => r.json()).then(m => {
     regionsManifest = m;
-    populateRegionsCountrySelect();
+    populateRegionByEthCountrySelect();
   }).catch(err => {
     console.warn('Не удалось загрузить список регионов:', err);
     regionsManifest = {};
@@ -2015,48 +2034,45 @@ function regionOf(np){
   np.__region = bestName;
   return np.__region;
 }
-function regionVisible(np){
-  if(selectedRegions.size === 0) return true;
-  return selectedRegions.has(regionOf(np));
-}
-function updateRegionsActiveLabel(){
-  const n = selectedRegions.size;
-  document.getElementById('regions-active-label').textContent = n ? `(${n})` : '';
+let regionsFocus = ''; // plain "Регионы" panel — selected country
+let selectedRegionsPlain = new Set(); // selected region names within that country — map filter
+function regionsPlainVisible(np){
+  if(!regionsFocus || selectedRegionsPlain.size === 0) return true;
+  if(countryOf(np) !== regionsFocus) return true; // only constrains NPs in the focused country
+  return selectedRegionsPlain.has(regionOf(np));
 }
 function populateRegionsCountrySelect(){
   const sel = document.getElementById('regions-country-select');
   if(!regionsManifest) return;
   const countries = Object.keys(regionsManifest).sort((a,b) => a.localeCompare(b, 'ru'));
-  if(!countries.length){
-    sel.innerHTML = '<option value="">Пока нет размеченных стран</option>';
-    return;
-  }
   const prev = sel.value;
   sel.innerHTML = '<option value="">Выберите страну…</option>' + countries.map(c => `<option value="${c}">${c}</option>`).join('');
   if(prev && countries.includes(prev)) sel.value = prev;
 }
+function updateRegionsActiveLabel(){
+  const n = selectedRegionsPlain.size;
+  document.getElementById('regions-active-label').textContent = n ? `(${n})` : '';
+}
 function renderRegionsList(filterQ){
   const listEl = document.getElementById('regions-list');
+  const actionsEl = document.getElementById('regions-list-actions');
   const searchEl = document.getElementById('regions-list-search');
-  const btnRow = document.getElementById('regions-list-btnrow');
-  const country = document.getElementById('regions-country-select').value;
   listEl.innerHTML = '';
-  if(!country || !REGIONS[country]){
-    searchEl.style.display = 'none';
-    btnRow.style.display = 'none';
+  if(!regionsFocus || !REGIONS[regionsFocus]){
+    actionsEl.style.display = 'none'; searchEl.style.display = 'none';
     return;
   }
-  searchEl.style.display = '';
-  btnRow.style.display = '';
+  actionsEl.style.display = 'flex';
+  searchEl.style.display = 'block';
   const countByRegion = {};
   DATA.forEach(np => {
-    if(countryOf(np) !== country) return;
+    if(countryOf(np) !== regionsFocus) return;
     const r = regionOf(np);
     if(r) countByRegion[r] = (countByRegion[r]||0) + 1;
   });
-  const countryTotal = DATA.filter(np => countryOf(np) === country).length;
+  const countryTotal = DATA.filter(np => countryOf(np) === regionsFocus).length;
   const q = (filterQ||'').trim().toLowerCase();
-  let names = REGIONS[country].map(r => r.name_ru).filter(n => countByRegion[n]);
+  let names = REGIONS[regionsFocus].map(r => r.name_ru).filter(n => countByRegion[n]);
   if(q) names = names.filter(n => n.toLowerCase().includes(q));
   names.sort((a,b) => (countByRegion[b]||0) - (countByRegion[a]||0));
   const frag = document.createDocumentFragment();
@@ -2065,11 +2081,11 @@ function renderRegionsList(filterQ){
     const pct = countryTotal ? (count/countryTotal*100).toFixed(1) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
-    const checked = selectedRegions.has(name);
+    const checked = selectedRegionsPlain.has(name);
     row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
-      if(e.target.checked) selectedRegions.add(name); else selectedRegions.delete(name);
+      if(e.target.checked) selectedRegionsPlain.add(name); else selectedRegionsPlain.delete(name);
       updateRegionsActiveLabel();
       render(); resetNpList();
     });
@@ -2078,29 +2094,118 @@ function renderRegionsList(filterQ){
   listEl.appendChild(frag);
 }
 document.getElementById('regions-country-select').addEventListener('change', () => {
-  const country = document.getElementById('regions-country-select').value;
-  if(!country){ renderRegionsList(); return; }
-  ensureCountryRegionsLoaded(country).then(() => renderRegionsList(document.getElementById('regions-list-search').value));
+  regionsFocus = document.getElementById('regions-country-select').value;
+  selectedRegionsPlain = new Set();
+  document.getElementById('regions-list-search').value = '';
+  updateRegionsActiveLabel();
+  if(regionsFocus) flyToCountry(regionsFocus);
+  render(); resetNpList();
+  if(regionsFocus){
+    ensureCountryRegionsLoaded(regionsFocus).then(() => renderRegionsList());
+  } else {
+    renderRegionsList();
+  }
 });
 document.getElementById('regions-list-search').addEventListener('input', e => renderRegionsList(e.target.value));
 document.getElementById('regions-list-none').onclick = () => {
-  // only clears regions belonging to the currently shown country, same spirit as other
-  // "выключить все" buttons which act on what's currently on screen
-  const country = document.getElementById('regions-country-select').value;
-  if(REGIONS[country]) REGIONS[country].forEach(r => selectedRegions.delete(r.name_ru));
+  if(regionsFocus && REGIONS[regionsFocus]) REGIONS[regionsFocus].forEach(r => selectedRegionsPlain.delete(r.name_ru));
   updateRegionsActiveLabel();
   renderRegionsList(document.getElementById('regions-list-search').value);
   render(); resetNpList();
 };
 document.getElementById('regions-header').addEventListener('click', () => {
-  ensureManifestLoaded().then(() => renderRegionsList(document.getElementById('regions-list-search').value));
+  ensureManifestLoaded().then(() => populateRegionsCountrySelect());
+});
+
+let regionByEthFocus = ''; // selected country
+let selectedRegionByEth = new Set(); // selected region names within that country — map filter
+function regionByEthVisible(np){
+  if(!regionByEthFocus || selectedRegionByEth.size === 0) return true;
+  if(countryOf(np) !== regionByEthFocus) return true; // only constrains NPs in the focused country
+  return selectedRegionByEth.has(regionOf(np));
+}
+function populateRegionByEthCountrySelect(){
+  const sel = document.getElementById('region-by-eth-country-select');
+  if(!regionsManifest) return;
+  const countries = Object.keys(regionsManifest).sort((a,b) => a.localeCompare(b, 'ru'));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Выберите страну…</option>' + countries.map(c => `<option value="${c}">${c}</option>`).join('');
+  if(prev && countries.includes(prev)) sel.value = prev;
+}
+function updateRegionByEthActiveLabel(){
+  const n = selectedRegionByEth.size;
+  document.getElementById('region-by-eth-active-label').textContent = n ? `(${n})` : '';
+}
+function renderRegionByEthList(filterQ){
+  const listEl = document.getElementById('region-by-eth-list');
+  const actionsEl = document.getElementById('region-by-eth-actions');
+  const searchEl = document.getElementById('region-by-eth-search');
+  listEl.innerHTML = '';
+  if(!regionByEthFocus || !REGIONS[regionByEthFocus]){
+    actionsEl.style.display = 'none'; searchEl.style.display = 'none';
+    return;
+  }
+  actionsEl.style.display = 'flex';
+  searchEl.style.display = 'block';
+  const countByRegion = {};
+  DATA.forEach(np => {
+    if(countryOf(np) !== regionByEthFocus) return;
+    const r = regionOf(np);
+    if(r) countByRegion[r] = (countByRegion[r]||0) + 1;
+  });
+  const countryTotal = DATA.filter(np => countryOf(np) === regionByEthFocus).length;
+  const q = (filterQ||'').trim().toLowerCase();
+  let names = REGIONS[regionByEthFocus].map(r => r.name_ru).filter(n => countByRegion[n]);
+  if(q) names = names.filter(n => n.toLowerCase().includes(q));
+  names.sort((a,b) => (countByRegion[b]||0) - (countByRegion[a]||0));
+  const frag = document.createDocumentFragment();
+  names.forEach(name => {
+    const count = countByRegion[name] || 0;
+    const pct = countryTotal ? (count/countryTotal*100).toFixed(1) : '0';
+    const row = document.createElement('div');
+    row.className = 'eth-item';
+    const checked = selectedRegionByEth.has(name);
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+      <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if(e.target.checked) selectedRegionByEth.add(name); else selectedRegionByEth.delete(name);
+      updateRegionByEthActiveLabel();
+      render(); resetNpList();
+    });
+    frag.appendChild(row);
+  });
+  listEl.appendChild(frag);
+}
+document.getElementById('region-by-eth-country-select').addEventListener('change', () => {
+  regionByEthFocus = document.getElementById('region-by-eth-country-select').value;
+  selectedRegionByEth = new Set();
+  document.getElementById('region-by-eth-search').value = '';
+  updateRegionByEthActiveLabel();
+  if(regionByEthFocus) flyToCountry(regionByEthFocus);
+  render(); resetNpList();
+  if(regionByEthFocus){
+    ensureCountryRegionsLoaded(regionByEthFocus).then(() => renderRegionByEthList());
+  } else {
+    renderRegionByEthList();
+  }
+});
+document.getElementById('region-by-eth-search').addEventListener('input', e => renderRegionByEthList(e.target.value));
+document.getElementById('region-by-eth-none').onclick = () => {
+  if(regionByEthFocus && REGIONS[regionByEthFocus]) REGIONS[regionByEthFocus].forEach(r => selectedRegionByEth.delete(r.name_ru));
+  updateRegionByEthActiveLabel();
+  renderRegionByEthList(document.getElementById('region-by-eth-search').value);
+  render(); resetNpList();
+};
+document.getElementById('region-by-eth-header').addEventListener('click', () => {
+  ensureManifestLoaded().then(() => populateRegionByEthCountrySelect());
 });
 
 function npVisible(np){
   if(!enabledLayers.has(np.layer)) return false;
   if(!pctVisible(np)) return false;
   if(!countryVisible(np)) return false;
-  if(!regionVisible(np)) return false;
+  if(!regionsPlainVisible(np)) return false;
+  if(!regionByEthVisible(np)) return false;
   if(!ethByCountryVisible(np)) return false;
   if(!ethByRegionVisible(np)) return false;
   if(!countryByEthVisible(np)) return false;
