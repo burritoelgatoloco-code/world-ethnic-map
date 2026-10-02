@@ -307,9 +307,14 @@
         <select id="region-by-eth-country-select" class="box" style="margin-bottom:8px;">
           <option value="">Выберите страну…</option>
         </select>
-        <input id="region-by-eth-search" class="box" placeholder="Поиск региона…" style="display:none; margin-bottom:8px;" />
+        <select id="region-by-eth-region-select" class="box" style="margin-bottom:8px; display:none;">
+          <option value="">Выберите регион…</option>
+        </select>
+        <input id="region-by-eth-search" class="box" placeholder="Поиск этноса в списке…" style="display:none; margin-bottom:8px;" />
         <div class="btn-row" id="region-by-eth-actions" style="display:none;">
+          <div class="btn-mini" id="region-by-eth-all">Включить все</div>
           <div class="btn-mini" id="region-by-eth-none">Выключить все</div>
+          <div class="btn-mini" id="region-by-eth-reset">Сбросить</div>
         </div>
         <div id="region-by-eth-list" style="max-height:260px; overflow-y:auto;"></div>
       </div>
@@ -2118,11 +2123,13 @@ document.getElementById('regions-header').addEventListener('click', () => {
 });
 
 let regionByEthFocus = ''; // selected country
-let selectedRegionByEth = new Set(); // selected region names within that country — map filter
+let regionByEthRegion = ''; // selected region within that country
+let regionByEthToggles = new Set(); // selected ethnicity root names — map filter
 function regionByEthVisible(np){
-  if(!regionByEthFocus || selectedRegionByEth.size === 0) return true;
-  if(countryOf(np) !== regionByEthFocus) return true; // only constrains NPs in the focused country
-  return selectedRegionByEth.has(regionOf(np));
+  if(!regionByEthFocus || !regionByEthRegion) return true;
+  if(countryOf(np) !== regionByEthFocus) return true;
+  if(regionOf(np) !== regionByEthRegion) return true; // only constrains NPs in the focused region
+  return regionByEthToggles.has(dominantRootOf(np));
 }
 function populateRegionByEthCountrySelect(){
   const sel = document.getElementById('region-by-eth-country-select');
@@ -2132,44 +2139,63 @@ function populateRegionByEthCountrySelect(){
   sel.innerHTML = '<option value="">Выберите страну…</option>' + countries.map(c => `<option value="${c}">${c}</option>`).join('');
   if(prev && countries.includes(prev)) sel.value = prev;
 }
-function updateRegionByEthActiveLabel(){
-  const n = selectedRegionByEth.size;
-  document.getElementById('region-by-eth-active-label').textContent = n ? `(${n})` : '';
+function populateRegionByEthRegionSelect(){
+  const sel = document.getElementById('region-by-eth-region-select');
+  if(!regionByEthFocus || !REGIONS[regionByEthFocus]){
+    sel.style.display = 'none';
+    return;
+  }
+  sel.style.display = '';
+  const names = REGIONS[regionByEthFocus].map(r => r.name_ru).sort((a,b) => a.localeCompare(b, 'ru'));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Выберите регион…</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
+  if(prev && names.includes(prev)) sel.value = prev;
+}
+function selectAllRegionByEth(){
+  DATA.forEach(np => {
+    if(countryOf(np) === regionByEthFocus && regionOf(np) === regionByEthRegion){
+      const root = dominantRootOf(np);
+      if(root) regionByEthToggles.add(root);
+    }
+  });
 }
 function renderRegionByEthList(filterQ){
   const listEl = document.getElementById('region-by-eth-list');
   const actionsEl = document.getElementById('region-by-eth-actions');
   const searchEl = document.getElementById('region-by-eth-search');
+  const labelEl = document.getElementById('region-by-eth-active-label');
   listEl.innerHTML = '';
-  if(!regionByEthFocus || !REGIONS[regionByEthFocus]){
-    actionsEl.style.display = 'none'; searchEl.style.display = 'none';
+  if(!regionByEthFocus || !regionByEthRegion){
+    actionsEl.style.display = 'none'; searchEl.style.display = 'none'; labelEl.textContent = '';
     return;
   }
   actionsEl.style.display = 'flex';
   searchEl.style.display = 'block';
-  const countByRegion = {};
+  labelEl.textContent = `(${regionByEthRegion}: ${regionByEthToggles.size})`;
+  const countByEth = {};
+  let total = 0;
   DATA.forEach(np => {
     if(countryOf(np) !== regionByEthFocus) return;
-    const r = regionOf(np);
-    if(r) countByRegion[r] = (countByRegion[r]||0) + 1;
+    if(regionOf(np) !== regionByEthRegion) return;
+    total++;
+    const root = dominantRootOf(np);
+    if(root) countByEth[root] = (countByEth[root]||0) + 1;
   });
-  const countryTotal = DATA.filter(np => countryOf(np) === regionByEthFocus).length;
   const q = (filterQ||'').trim().toLowerCase();
-  let names = REGIONS[regionByEthFocus].map(r => r.name_ru).filter(n => countByRegion[n]);
-  if(q) names = names.filter(n => n.toLowerCase().includes(q));
-  names.sort((a,b) => (countByRegion[b]||0) - (countByRegion[a]||0));
+  let ethNames = Object.keys(countByEth).sort((a,b) => countByEth[b]-countByEth[a]);
+  if(q) ethNames = ethNames.filter(n => n.toLowerCase().includes(q));
   const frag = document.createDocumentFragment();
-  names.forEach(name => {
-    const count = countByRegion[name] || 0;
-    const pct = countryTotal ? (count/countryTotal*100).toFixed(1) : '0';
+  ethNames.forEach(name => {
+    const count = countByEth[name];
+    const pct = total ? (count/total*100).toFixed(1) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
-    const checked = selectedRegionByEth.has(name);
+    const checked = regionByEthToggles.has(name);
     row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
-      if(e.target.checked) selectedRegionByEth.add(name); else selectedRegionByEth.delete(name);
-      updateRegionByEthActiveLabel();
+      if(e.target.checked) regionByEthToggles.add(name); else regionByEthToggles.delete(name);
+      renderRegionByEthList(searchEl.value);
       render(); resetNpList();
     });
     frag.appendChild(row);
@@ -2178,22 +2204,43 @@ function renderRegionByEthList(filterQ){
 }
 document.getElementById('region-by-eth-country-select').addEventListener('change', () => {
   regionByEthFocus = document.getElementById('region-by-eth-country-select').value;
-  selectedRegionByEth = new Set();
+  regionByEthRegion = '';
+  regionByEthToggles = new Set();
   document.getElementById('region-by-eth-search').value = '';
-  updateRegionByEthActiveLabel();
+  document.getElementById('region-by-eth-region-select').style.display = 'none';
   if(regionByEthFocus) flyToCountry(regionByEthFocus);
+  renderRegionByEthList('');
   render(); resetNpList();
   if(regionByEthFocus){
-    ensureCountryRegionsLoaded(regionByEthFocus).then(() => renderRegionByEthList());
-  } else {
-    renderRegionByEthList();
+    ensureCountryRegionsLoaded(regionByEthFocus).then(() => populateRegionByEthRegionSelect());
   }
 });
+document.getElementById('region-by-eth-region-select').addEventListener('change', () => {
+  regionByEthRegion = document.getElementById('region-by-eth-region-select').value;
+  regionByEthToggles = new Set();
+  document.getElementById('region-by-eth-search').value = '';
+  if(regionByEthRegion) selectAllRegionByEth();
+  renderRegionByEthList('');
+  render(); resetNpList();
+});
 document.getElementById('region-by-eth-search').addEventListener('input', e => renderRegionByEthList(e.target.value));
-document.getElementById('region-by-eth-none').onclick = () => {
-  if(regionByEthFocus && REGIONS[regionByEthFocus]) REGIONS[regionByEthFocus].forEach(r => selectedRegionByEth.delete(r.name_ru));
-  updateRegionByEthActiveLabel();
+document.getElementById('region-by-eth-all').onclick = () => {
+  selectAllRegionByEth();
   renderRegionByEthList(document.getElementById('region-by-eth-search').value);
+  render(); resetNpList();
+};
+document.getElementById('region-by-eth-none').onclick = () => {
+  regionByEthToggles = new Set();
+  renderRegionByEthList(document.getElementById('region-by-eth-search').value);
+  render(); resetNpList();
+};
+document.getElementById('region-by-eth-reset').onclick = () => {
+  regionByEthFocus = ''; regionByEthRegion = ''; regionByEthToggles = new Set();
+  document.getElementById('region-by-eth-country-select').value = '';
+  document.getElementById('region-by-eth-region-select').value = '';
+  document.getElementById('region-by-eth-region-select').style.display = 'none';
+  document.getElementById('region-by-eth-search').value = '';
+  renderRegionByEthList('');
   render(); resetNpList();
 };
 document.getElementById('region-by-eth-header').addEventListener('click', () => {
