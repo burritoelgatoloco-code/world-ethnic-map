@@ -2126,9 +2126,10 @@ let regionByEthFocus = ''; // selected country
 let regionByEthRegion = ''; // selected region within that country
 let regionByEthToggles = new Set(); // selected ethnicity root names — map filter
 function regionByEthVisible(np){
-  if(!regionByEthFocus || !regionByEthRegion) return true;
-  if(countryOf(np) !== regionByEthFocus) return true;
-  if(regionOf(np) !== regionByEthRegion) return true; // only constrains NPs in the focused region
+  if(!regionByEthFocus) return true;
+  if(countryOf(np) !== regionByEthFocus) return false;
+  if(!regionByEthRegion) return true;
+  if(regionOf(np) !== regionByEthRegion) return false;
   return regionByEthToggles.has(dominantRootOf(np));
 }
 function populateRegionByEthCountrySelect(){
