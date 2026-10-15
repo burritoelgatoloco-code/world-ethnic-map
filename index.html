@@ -1234,6 +1234,10 @@ const flagCanvas = document.createElement('canvas');
 flagCanvas.style.position = 'absolute';
 flagCanvas.style.top = '0';
 flagCanvas.style.left = '0';
+// Explicit, not inherited — relying on inheritance from Leaflet's own .leaflet-grab class
+// apparently renders inconsistently on some Windows setups (shows the generic 4-way
+// move/diamond cursor instead of an open-hand grab cursor) after an OS update.
+flagCanvas.style.cursor = 'grab';
 map.getPanes().overlayPane.appendChild(flagCanvas);
 // (click propagation is stopped inside the click handler itself, below — NOT via
 // disableClickPropagation, which would also block mousedown and break map dragging)
@@ -1394,7 +1398,7 @@ document.addEventListener('mousemove', (e) => {
     dragActive.lat = dragOrigLat; dragActive.lng = dragOrigLng;
     dragActive = null; dragCandidate = null;
     map.dragging.enable();
-    flagCanvas.style.cursor = '';
+    flagCanvas.style.cursor = 'grab';
     scheduleRedraw();
     return;
   }
@@ -1410,7 +1414,7 @@ document.addEventListener('mouseup', async () => {
   if(dragActive){
     dragMoved = true;
     map.dragging.enable();
-    flagCanvas.style.cursor = '';
+    flagCanvas.style.cursor = 'grab';
     const np = dragActive;
     dragActive = null;
     dragCandidate = null;
