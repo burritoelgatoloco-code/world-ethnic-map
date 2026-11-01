@@ -421,7 +421,24 @@ const isOwnerDevice = (() => {
 
     const startedAt = Date.now();
     let visitRowId = null;
-    function currentDuration(){ return Math.round((Date.now() - startedAt) / 1000); }
+    // Active time only: counts while the tab is visible AND the user did something (mouse, touch,
+// keys, scroll) within the last 60 s — so a sleeping/off device with the tab left open adds nothing.
+const ACTIVE_WINDOW_MS = 60000;
+let activeMs = 0, lastActivity = Date.now(), lastTick = Date.now();
+let lastTickVisible = document.visibilityState === 'visible';
+['mousemove','mousedown','pointerdown','keydown','touchstart','touchmove','wheel','scroll'].forEach(ev =>
+  window.addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true, capture: true }));
+function tickActive(){
+  const now = Date.now();
+  if(lastTickVisible){
+    const counted = Math.min(now, lastActivity + ACTIVE_WINDOW_MS) - lastTick;
+    if(counted > 0) activeMs += counted;
+  }
+  lastTick = now;
+  lastTickVisible = document.visibilityState === 'visible';
+}
+setInterval(tickActive, 5000);
+function currentDuration(){ tickActive(); return Math.round(activeMs / 1000); }
 
     // Raw REST fetch (not the supabase-js client) so we can set `keepalive: true` on the
     // final beacon-like updates — that's what lets the request actually leave the browser
@@ -468,6 +485,7 @@ const isOwnerDevice = (() => {
         }
       }, 25000);
       document.addEventListener('visibilitychange', () => {
+        tickActive();
         if(document.visibilityState === 'hidden'){
           patchVisit({ last_seen_at: new Date().toISOString(), duration_seconds: currentDuration() }, true);
         }
@@ -493,6 +511,19 @@ function flagHtmlFor(name, px){
     return `<img src="${customFlags[name]}" style="width:${px}px;height:${h}px;object-fit:cover;border-radius:2px;vertical-align:middle;">`;
   }
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
+}
+// Percent without rounding: truncates (never rounds up) to 2 decimals, drops trailing zeros.
+// 48.99 stays 48.99 (not 49.0); the 1e-7 only guards against float noise like 28.999999999.
+function fmtPct(x){ return String(Math.floor(x*100 + 1e-7)/100); }
+
+// Country-name display fixes: "Острова" -> "острова" mid-name (except Мэн, Святой Елены, Кука,
+// Питкэрн), and the Wake Island entry is dropped entirely (it is part of the USA).
+const COUNTRY_NAME_KEEP_CAPS = /Мэн|Святой Елены|Кука|Питкэрн/;
+const COUNTRY_DROP = /Уэйк|^Wake\b/i;
+function fixCountryName(n){
+  if(!n || typeof n !== 'string') return n;
+  if(COUNTRY_NAME_KEEP_CAPS.test(n)) return n;
+  return n.replace(/(\S\s+)Острова(?![А-Яа-яЁё])/g, '$1острова');
 }
 function cap(s){ return s.length ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 
@@ -534,7 +565,7 @@ async function loadVisitStats(){
 
   // ---- time on map: aggregate + average ----
   const totalSeconds = rows.reduce((s,r) => s + (r.duration_seconds||0), 0);
-  html += `<div style="margin-bottom:10px;">Суммарное время на карте: <b>${formatDuration(totalSeconds)}</b><br>Среднее время за сессию: <b>${formatDuration(totalSeconds/rows.length)}</b></div>`;
+  html += `<div style="margin-bottom:10px;">Суммарное время активности: <b>${formatDuration(totalSeconds)}</b><br>Среднее время активности за сессию: <b>${formatDuration(totalSeconds/rows.length)}</b></div>`;
 
   // ---- by country/city: opens AND unique visitors, same shape as the periods table ----
   const byLoc = {};
@@ -1622,12 +1653,12 @@ function lookupCountry(lat, lng){
   return bestName;
 }
 function countryOf(np){
-  if(np.country) return np.country; // manual override, set by you in the edit form — always wins
+  if(np.country) return fixCountryName(np.country); // manual override, set by you in the edit form — always wins
   if(np.__country !== undefined) return np.__country;
   const override = findOverrideCountry(np);
-  if(override){ np.__country = override; return override; }
+  if(override){ np.__country = fixCountryName(override); return np.__country; }
   if(!COUNTRIES) return null; // not loaded yet — don't cache, so it gets computed properly once it is
-  np.__country = lookupCountry(np.lat, np.lng);
+  np.__country = fixCountryName(lookupCountry(np.lat, np.lng));
   return np.__country;
 }
 function countryVisible(np){
@@ -1661,10 +1692,11 @@ function renderEthByCountryList(){
   });
   const grandTotal = Object.values(countByCountry).reduce((a,b) => a+b, 0);
   const countryNames = Object.keys(countByCountry).sort((a,b) => countByCountry[b]-countByCountry[a]);
+  if(!countryNames.length){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   countryNames.forEach(name => {
     const count = countByCountry[name];
-    const pct = grandTotal ? (count/grandTotal*100).toFixed(1) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = ethByCountryToggles.has(name);
@@ -1756,10 +1788,11 @@ function renderEthByRegionList(){
   });
   const grandTotal = Object.values(byKey).reduce((a,b) => a+b.count, 0);
   const keys = Object.keys(byKey).sort((a,b) => byKey[b].count - byKey[a].count);
+  if(!keys.length){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   keys.forEach(key => {
     const { region, country, count } = byKey[key];
-    const pct = grandTotal ? (count/grandTotal*100).toFixed(1) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
     const label = `${region}, ${country}`;
     const row = document.createElement('div');
     row.className = 'eth-item';
@@ -1829,10 +1862,11 @@ function renderCountryByEthList(filterQ){
   const q = (filterQ||'').trim().toLowerCase();
   let ethNames = Object.keys(countByEth).sort((a,b) => countByEth[b]-countByEth[a]);
   if(q) ethNames = ethNames.filter(n => n.toLowerCase().includes(q));
+  if(!ethNames.length && !q){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   ethNames.forEach(name => {
     const count = countByEth[name];
-    const pct = total ? (count/total*100).toFixed(1) : '0';
+    const pct = total ? fmtPct(count/total*100) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = countryByEthToggles.has(name);
@@ -1896,8 +1930,8 @@ fetch('countries.geo.json').then(r => r.json()).then(geo => {
       if(x < minX) minX = x; if(x > maxX) maxX = x;
       if(y < minY) minY = y; if(y > maxY) maxY = y;
     }));
-    return { name_ru: f.properties.name_ru, polys, bbox: [minX, minY, maxX, maxY] };
-  });
+    return { name_ru: fixCountryName(f.properties.name_ru), polys, bbox: [minX, minY, maxX, maxY] };
+  }).filter(c => !COUNTRY_DROP.test(c.name_ru));
   const names = [...new Set(COUNTRIES.map(c => c.name_ru))].sort((a, b) => a.localeCompare(b, 'ru'));
   const countryByEthSelect = document.getElementById('country-by-eth-select');
   names.forEach(name => {
@@ -1939,10 +1973,11 @@ function renderCountryList(filterQ){
   let names = [...new Set(COUNTRIES.map(c => c.name_ru))].filter(n => countByCountry[n]);
   if(q) names = names.filter(n => n.toLowerCase().includes(q));
   names.sort((a,b) => (countByCountry[b]||0) - (countByCountry[a]||0));
+  if(!names.length && !q){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   names.forEach(name => {
     const count = countByCountry[name] || 0;
-    const pct = grandTotal ? (count/grandTotal*100).toFixed(1) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = selectedCountries.has(name);
@@ -1984,7 +2019,9 @@ const chunkLoadPromises = {}; // chunk filename -> in-flight/resolved promise
 function ensureManifestLoaded(){
   if(manifestLoadPromise) return manifestLoadPromise;
   manifestLoadPromise = fetch('regions_manifest.json').then(r => r.json()).then(m => {
-    regionsManifest = m;
+    const mm = {};
+    Object.keys(m).forEach(k => { if(!COUNTRY_DROP.test(k)) mm[fixCountryName(k)] = m[k]; });
+    regionsManifest = mm;
     populateRegionByEthCountrySelect();
   }).catch(err => {
     console.warn('Не удалось загрузить список регионов:', err);
@@ -1998,7 +2035,8 @@ function mergeRegionsChunk(geo){
     const xs = [], ys = [];
     polys.forEach(rings => rings[0].forEach(([x,y]) => { xs.push(x); ys.push(y); }));
     const bbox = xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : [0,0,0,0];
-    const country = f.properties.country;
+    const country = fixCountryName(f.properties.country);
+    if(COUNTRY_DROP.test(country)) return;
     (REGIONS[country] = REGIONS[country] || []).push({ name_ru: f.properties.name_ru, polys, bbox });
   });
 }
@@ -2084,10 +2122,11 @@ function renderRegionsList(filterQ){
   let names = REGIONS[regionsFocus].map(r => r.name_ru).filter(n => countByRegion[n]);
   if(q) names = names.filter(n => n.toLowerCase().includes(q));
   names.sort((a,b) => (countByRegion[b]||0) - (countByRegion[a]||0));
+  if(!names.length && !q){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   names.forEach(name => {
     const count = countByRegion[name] || 0;
-    const pct = countryTotal ? (count/countryTotal*100).toFixed(1) : '0';
+    const pct = countryTotal ? fmtPct(count/countryTotal*100) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = selectedRegionsPlain.has(name);
@@ -2189,10 +2228,11 @@ function renderRegionByEthList(filterQ){
   const q = (filterQ||'').trim().toLowerCase();
   let ethNames = Object.keys(countByEth).sort((a,b) => countByEth[b]-countByEth[a]);
   if(q) ethNames = ethNames.filter(n => n.toLowerCase().includes(q));
+  if(!ethNames.length && !q){ listEl.appendChild(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Временно нет данных' })); return; }
   const frag = document.createDocumentFragment();
   ethNames.forEach(name => {
     const count = countByEth[name];
-    const pct = total ? (count/total*100).toFixed(1) : '0';
+    const pct = total ? fmtPct(count/total*100) : '0';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = regionByEthToggles.has(name);
