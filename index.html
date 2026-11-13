@@ -2367,6 +2367,11 @@ function popupHtml(np){
 // were first imported. A blank line ends the ethnicities list — everything after the
 // FIRST blank line is kept verbatim as a free-text note (e.g. "Всего 13% - филиппинцы")
 // and is never parsed as more ethnicity entries.
+// Ethnicity names are stored lowercase, except these proper names: "аборигены Торресова п-ва",
+// "жители островов Кука".
+function fixEthName(n){
+  return n.replace(/торресова/g, 'Торресова').replace(/(^|[^а-яё])кука(?![а-яё])/g, '$1Кука');
+}
 function parseEditLines(text){
   const rawLines = text.split('\n');
   let splitAt = rawLines.findIndex(l => l.trim() === '');
@@ -2382,9 +2387,9 @@ function parseEditLines(text){
     if(m){
       const pctStr = m[1];
       const pctNum = parseFloat(pctStr.replace(',', '.'));
-      return { pct: pctNum, pct_display: pctStr, name: m[2].trim().toLowerCase() };
+      return { pct: pctNum, pct_display: pctStr, name: fixEthName(m[2].trim().toLowerCase()) };
     }
-    return { pct: null, pct_display: null, name: line.toLowerCase() };
+    return { pct: null, pct_display: null, name: fixEthName(line.toLowerCase()) };
   });
   return { ethnicities, notes };
 }
