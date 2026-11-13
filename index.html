@@ -229,11 +229,11 @@
 
     <div class="section" id="sub-section">
       <div class="section-title collapsible" data-target="sub-body">
-        <span>Субэтносы <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(в скобках)</span></span>
+        <span>Субэтносы/субгруппы <span style="color:var(--text-dim); text-transform:none; font-weight:400;">(в скобках)</span></span>
         <span class="chevron">▸</span>
       </div>
       <div class="section-body" id="sub-body" style="display:none;">
-        <input id="sub-search" class="box" placeholder="Поиск субэтноса…" />
+        <input id="sub-search" class="box" placeholder="Поиск субэтноса/субгруппы…" />
         <div class="btn-row">
           <div class="btn-mini" id="sub-select-all">Включить все</div>
           <div class="btn-mini" id="sub-select-none">Выключить все</div>
@@ -512,9 +512,11 @@ function flagHtmlFor(name, px){
   }
   return `<span style="font-size:${px}px;line-height:1;">${flagFor(name)}</span>`;
 }
-// Percent without rounding: truncates (never rounds up) to 2 decimals, drops trailing zeros.
+// Percent without rounding: truncates (never rounds up) to exactly 2 decimals (1.1 -> 1.10).
 // 48.99 stays 48.99 (not 49.0); the 1e-7 only guards against float noise like 28.999999999.
-function fmtPct(x){ return String(Math.floor(x*100 + 1e-7)/100); }
+function fmtPct(x){ return (Math.floor(x*100 + 1e-7)/100).toFixed(2); }
+// Thousands separator (non-breaking space so a number never wraps): 20256 -> 20 256
+function fmtNum(n){ const t = String(n); return /^\d+$/.test(t) ? t.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0') : t; }
 
 // Country-name display fixes: "Острова" -> "острова" mid-name (except Мэн, Святой Елены, Кука,
 // Питкэрн), and the Wake Island entry is dropped entirely (it is part of the USA).
@@ -559,7 +561,7 @@ async function loadVisitStats(){
   [['Сегодня',1], ['7 дней',7], ['30 дней',30], ['Всего',Infinity]].forEach(([label, days]) => {
     const subset = days === Infinity ? rows : rows.filter(r => inLast(days, r.started_at));
     const uniq = new Set(subset.map(r => r.visitor_id)).size;
-    html += `<tr><td>${label}</td><td style="text-align:right;">${subset.length}</td><td style="text-align:right;">${uniq}</td></tr>`;
+    html += `<tr><td>${label}</td><td style="text-align:right;">${fmtNum(subset.length)}</td><td style="text-align:right;">${fmtNum(uniq)}</td></tr>`;
   });
   html += '</table>';
 
@@ -580,13 +582,13 @@ async function loadVisitStats(){
   html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
   html += '<tr style="color:var(--text-dim);"><td></td><td style="text-align:right;">Открытий</td><td style="text-align:right;">Уникальных</td></tr>';
   Object.entries(byLoc).sort((a,b) => b[1].opens-a[1].opens).forEach(([loc,stat]) => {
-    html += `<tr style="border-bottom:1px solid var(--panel-border);"><td>${loc}</td><td style="text-align:right;">${stat.opens}</td><td style="text-align:right; color:var(--accent);">${stat.visitors.size}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid var(--panel-border);"><td>${loc}</td><td style="text-align:right;">${fmtNum(stat.opens)}</td><td style="text-align:right; color:var(--accent);">${fmtNum(stat.visitors.size)}</td></tr>`;
   });
   html += '</table></div>';
 
   // ---- per-session log (each visitor separately) ----
   const recent = rows.slice().sort((a,b) => new Date(b.started_at)-new Date(a.started_at)).slice(0, 300);
-  html += `<div class="hint" style="margin-bottom:4px;">Последние сессии (${recent.length} из ${rows.length}):</div>`;
+  html += `<div class="hint" style="margin-bottom:4px;">Последние сессии (${fmtNum(recent.length)} из ${fmtNum(rows.length)}):</div>`;
   html += '<div style="max-height:240px; overflow-y:auto;">';
   recent.forEach(r => {
     const dateStr = new Date(r.started_at).toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
@@ -638,8 +640,13 @@ function tagsOf(rawName){
 function dominantEntryOf(np){
   return np.ethnicities.length ? np.ethnicities[0] : null;
 }
+// NPs with no ethnicity data are a pseudo-ethnicity in every list, so they can be listed,
+// counted, toggled and shown on the map together with everything else.
+const NO_DATA = 'Временно нет данных';
+function dominantKeyOf(np){ return np.ethnicities.length ? dominantRootOf(np) : NO_DATA; }
 function tagSetOf(np, domOnly){
   const s = new Set();
+  if(!np.ethnicities.length){ s.add(NO_DATA); return s; }
   const entries = domOnly ? (np.ethnicities.length ? [dominantEntryOf(np)] : []) : np.ethnicities;
   entries.forEach(e => tagsOf(e.name).forEach(t => { s.add(t.root); t.subs.forEach(sub => s.add(sub)); }));
   return s;
@@ -989,6 +996,11 @@ function recomputeCounts(){
 
   DATA.forEach(np => {
     if(!enabledLayers.has(np.layer)) return;
+    if(!np.ethnicities.length){
+      rootPresence[NO_DATA] = (rootPresence[NO_DATA]||0) + 1;
+      rootDominant[NO_DATA] = (rootDominant[NO_DATA]||0) + 1;
+      return;
+    }
     const allT = [];
     np.ethnicities.forEach(e => allT.push(...tagsOf(e.name)));
     const seenR=new Set(), seenS=new Set();
@@ -1161,8 +1173,8 @@ function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countF
     div.innerHTML = `
       <span class="flag-ic">${flagHtmlFor(name,15)}</span>
       <span class="eth-name" title="${name}">${cap(name)}</span>
-      <span class="upload-ic" title="Загрузить свой флаг для «${name}»">📎</span>
-      <span class="eth-count">${countFn(name)}</span>
+      <span class="upload-ic" title="Загрузить свой флаг для «${name}»" ${name===NO_DATA?'style="visibility:hidden"':''}>📎</span>
+      <span class="eth-count">${fmtNum(countFn(name))}</span>
       <label class="switch">
         <input type="checkbox" ${sel.has(name)?'checked':''} data-eth="${name}">
         <span class="slider"></span>
@@ -1672,7 +1684,7 @@ let ethByCountryFocus = '';
 let ethByCountryToggles = new Set();
 function ethByCountryVisible(np){
   if(!ethByCountryFocus) return true;
-  if(dominantRootOf(np) !== ethByCountryFocus) return false;
+  if(dominantKeyOf(np) !== ethByCountryFocus) return false;
   return ethByCountryToggles.has(countryOf(np));
 }
 function renderEthByCountryList(){
@@ -1683,10 +1695,10 @@ function renderEthByCountryList(){
   if(!ethByCountryFocus){ actionsEl.style.display = 'none'; labelEl.textContent = ''; return; }
   if(!COUNTRIES){ listEl.innerHTML = '<div class="hint">Границы стран ещё загружаются, попробуйте через секунду…</div>'; return; }
   actionsEl.style.display = 'flex';
-  labelEl.textContent = `(${ethByCountryFocus}: ${ethByCountryToggles.size})`;
+  labelEl.textContent = `(${ethByCountryFocus}: ${fmtNum(ethByCountryToggles.size)})`;
   const countByCountry = {};
   DATA.forEach(np => {
-    if(dominantRootOf(np) !== ethByCountryFocus) return;
+    if(dominantKeyOf(np) !== ethByCountryFocus) return;
     const c = countryOf(np);
     if(c) countByCountry[c] = (countByCountry[c]||0) + 1;
   });
@@ -1696,11 +1708,11 @@ function renderEthByCountryList(){
   const frag = document.createDocumentFragment();
   countryNames.forEach(name => {
     const count = countByCountry[name];
-    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0.00';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = ethByCountryToggles.has(name);
-    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) ethByCountryToggles.add(name); else ethByCountryToggles.delete(name);
@@ -1719,7 +1731,7 @@ document.getElementById('eth-by-country-select').addEventListener('change', e =>
   if(ethByCountryFocus){
     // start with every country that actually has this ethnicity switched ON
     DATA.forEach(np => {
-      if(dominantRootOf(np) === ethByCountryFocus){
+      if(dominantKeyOf(np) === ethByCountryFocus){
         const c = countryOf(np);
         if(c) ethByCountryToggles.add(c);
       }
@@ -1730,7 +1742,7 @@ document.getElementById('eth-by-country-select').addEventListener('change', e =>
 });
 document.getElementById('eth-by-country-all').onclick = () => {
   DATA.forEach(np => {
-    if(dominantRootOf(np) === ethByCountryFocus){
+    if(dominantKeyOf(np) === ethByCountryFocus){
       const c = countryOf(np);
       if(c) ethByCountryToggles.add(c);
     }
@@ -1756,14 +1768,14 @@ let ethByRegionToggles = new Set(); // keys: "RegionName||CountryName"
 function regionCountryKey(region, country){ return region + '||' + country; }
 function ethByRegionVisible(np){
   if(!ethByRegionFocus) return true;
-  if(dominantRootOf(np) !== ethByRegionFocus) return false;
+  if(dominantKeyOf(np) !== ethByRegionFocus) return false;
   const r = regionOf(np), c = countryOf(np);
   if(!r || !c) return false;
   return ethByRegionToggles.has(regionCountryKey(r, c));
 }
 function selectAllEthByRegion(){
   DATA.forEach(np => {
-    if(dominantRootOf(np) === ethByRegionFocus){
+    if(dominantKeyOf(np) === ethByRegionFocus){
       const r = regionOf(np), c = countryOf(np);
       if(r && c) ethByRegionToggles.add(regionCountryKey(r, c));
     }
@@ -1777,10 +1789,10 @@ function renderEthByRegionList(){
   if(!ethByRegionFocus){ actionsEl.style.display = 'none'; labelEl.textContent = ''; return; }
   if(!REGIONS){ listEl.innerHTML = '<div class="hint">Границы регионов ещё загружаются, попробуйте через секунду…</div>'; return; }
   actionsEl.style.display = 'flex';
-  labelEl.textContent = `(${ethByRegionFocus}: ${ethByRegionToggles.size})`;
+  labelEl.textContent = `(${ethByRegionFocus}: ${fmtNum(ethByRegionToggles.size)})`;
   const byKey = {}; // key -> {region, country, count}
   DATA.forEach(np => {
-    if(dominantRootOf(np) !== ethByRegionFocus) return;
+    if(dominantKeyOf(np) !== ethByRegionFocus) return;
     const r = regionOf(np), c = countryOf(np);
     if(!r || !c) return;
     const key = regionCountryKey(r, c);
@@ -1792,12 +1804,12 @@ function renderEthByRegionList(){
   const frag = document.createDocumentFragment();
   keys.forEach(key => {
     const { region, country, count } = byKey[key];
-    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0.00';
     const label = `${region}, ${country}`;
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = ethByRegionToggles.has(key);
-    row.innerHTML = `<span class="eth-name" title="${label}">${label}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${label}">${label}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) ethByRegionToggles.add(key); else ethByRegionToggles.delete(key);
@@ -1839,7 +1851,7 @@ let countryByEthToggles = new Set();
 function countryByEthVisible(np){
   if(!countryByEthFocus) return true;
   if(countryOf(np) !== countryByEthFocus) return false;
-  return countryByEthToggles.has(dominantRootOf(np));
+  return countryByEthToggles.has(dominantKeyOf(np));
 }
 function renderCountryByEthList(filterQ){
   const listEl = document.getElementById('country-by-eth-list');
@@ -1850,13 +1862,13 @@ function renderCountryByEthList(filterQ){
   if(!countryByEthFocus){ actionsEl.style.display = 'none'; searchEl.style.display = 'none'; labelEl.textContent = ''; return; }
   actionsEl.style.display = 'flex';
   searchEl.style.display = 'block';
-  labelEl.textContent = `(${countryByEthFocus}: ${countryByEthToggles.size})`;
+  labelEl.textContent = `(${countryByEthFocus}: ${fmtNum(countryByEthToggles.size)})`;
   const countByEth = {};
   let total = 0;
   DATA.forEach(np => {
     if(countryOf(np) !== countryByEthFocus) return;
     total++;
-    const root = dominantRootOf(np);
+    const root = dominantKeyOf(np);
     if(root) countByEth[root] = (countByEth[root]||0) + 1;
   });
   const q = (filterQ||'').trim().toLowerCase();
@@ -1866,11 +1878,11 @@ function renderCountryByEthList(filterQ){
   const frag = document.createDocumentFragment();
   ethNames.forEach(name => {
     const count = countByEth[name];
-    const pct = total ? fmtPct(count/total*100) : '0';
+    const pct = total ? fmtPct(count/total*100) : '0.00';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = countryByEthToggles.has(name);
-    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) countryByEthToggles.add(name); else countryByEthToggles.delete(name);
@@ -1889,7 +1901,7 @@ document.getElementById('country-by-eth-select').addEventListener('change', e =>
   if(countryByEthFocus){
     DATA.forEach(np => {
       if(countryOf(np) === countryByEthFocus){
-        const root = dominantRootOf(np);
+        const root = dominantKeyOf(np);
         if(root) countryByEthToggles.add(root);
       }
     });
@@ -1901,7 +1913,7 @@ document.getElementById('country-by-eth-search').addEventListener('input', e => 
 document.getElementById('country-by-eth-all').onclick = () => {
   DATA.forEach(np => {
     if(countryOf(np) === countryByEthFocus){
-      const root = dominantRootOf(np);
+      const root = dominantKeyOf(np);
       if(root) countryByEthToggles.add(root);
     }
   });
@@ -1957,7 +1969,7 @@ function flyToCountry(name){
 }
 function updateCountryActiveLabel(){
   const n = selectedCountries.size;
-  document.getElementById('country-active-label').textContent = n ? `(${n})` : '';
+  document.getElementById('country-active-label').textContent = n ? `(${fmtNum(n)})` : '';
 }
 function renderCountryList(filterQ){
   const listEl = document.getElementById('country-list');
@@ -1977,11 +1989,11 @@ function renderCountryList(filterQ){
   const frag = document.createDocumentFragment();
   names.forEach(name => {
     const count = countByCountry[name] || 0;
-    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0';
+    const pct = grandTotal ? fmtPct(count/grandTotal*100) : '0.00';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = selectedCountries.has(name);
-    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) selectedCountries.add(name); else selectedCountries.delete(name);
@@ -2098,7 +2110,7 @@ function populateRegionsCountrySelect(){
 }
 function updateRegionsActiveLabel(){
   const n = selectedRegionsPlain.size;
-  document.getElementById('regions-active-label').textContent = n ? `(${n})` : '';
+  document.getElementById('regions-active-label').textContent = n ? `(${fmtNum(n)})` : '';
 }
 function renderRegionsList(filterQ){
   const listEl = document.getElementById('regions-list');
@@ -2126,11 +2138,11 @@ function renderRegionsList(filterQ){
   const frag = document.createDocumentFragment();
   names.forEach(name => {
     const count = countByRegion[name] || 0;
-    const pct = countryTotal ? fmtPct(count/countryTotal*100) : '0';
+    const pct = countryTotal ? fmtPct(count/countryTotal*100) : '0.00';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = selectedRegionsPlain.has(name);
-    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) selectedRegionsPlain.add(name); else selectedRegionsPlain.delete(name);
@@ -2173,7 +2185,7 @@ function regionByEthVisible(np){
   if(countryOf(np) !== regionByEthFocus) return false;
   if(!regionByEthRegion) return true;
   if(regionOf(np) !== regionByEthRegion) return false;
-  return regionByEthToggles.has(dominantRootOf(np));
+  return regionByEthToggles.has(dominantKeyOf(np));
 }
 function populateRegionByEthCountrySelect(){
   const sel = document.getElementById('region-by-eth-country-select');
@@ -2198,7 +2210,7 @@ function populateRegionByEthRegionSelect(){
 function selectAllRegionByEth(){
   DATA.forEach(np => {
     if(countryOf(np) === regionByEthFocus && regionOf(np) === regionByEthRegion){
-      const root = dominantRootOf(np);
+      const root = dominantKeyOf(np);
       if(root) regionByEthToggles.add(root);
     }
   });
@@ -2215,14 +2227,14 @@ function renderRegionByEthList(filterQ){
   }
   actionsEl.style.display = 'flex';
   searchEl.style.display = 'block';
-  labelEl.textContent = `(${regionByEthRegion}: ${regionByEthToggles.size})`;
+  labelEl.textContent = `(${regionByEthRegion}: ${fmtNum(regionByEthToggles.size)})`;
   const countByEth = {};
   let total = 0;
   DATA.forEach(np => {
     if(countryOf(np) !== regionByEthFocus) return;
     if(regionOf(np) !== regionByEthRegion) return;
     total++;
-    const root = dominantRootOf(np);
+    const root = dominantKeyOf(np);
     if(root) countByEth[root] = (countByEth[root]||0) + 1;
   });
   const q = (filterQ||'').trim().toLowerCase();
@@ -2232,11 +2244,11 @@ function renderRegionByEthList(filterQ){
   const frag = document.createDocumentFragment();
   ethNames.forEach(name => {
     const count = countByEth[name];
-    const pct = total ? fmtPct(count/total*100) : '0';
+    const pct = total ? fmtPct(count/total*100) : '0.00';
     const row = document.createElement('div');
     row.className = 'eth-item';
     const checked = regionByEthToggles.has(name);
-    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${count} · ${pct}%</span>
+    row.innerHTML = `<span class="eth-name" title="${name}">${name}</span><span class="eth-count">${fmtNum(count)} · ${pct}%</span>
       <label class="switch"><input type="checkbox" ${checked?'checked':''}><span class="slider"></span></label>`;
     row.querySelector('input').addEventListener('change', (e) => {
       if(e.target.checked) regionByEthToggles.add(name); else regionByEthToggles.delete(name);
@@ -2301,12 +2313,7 @@ function npVisible(np){
   if(!ethByCountryVisible(np)) return false;
   if(!ethByRegionVisible(np)) return false;
   if(!countryByEthVisible(np)) return false;
-  if(np.ethnicities.length === 0){
-    // NPs with no ethnicity data at all show up while just browsing (deliberately empty,
-    // pending research), but drop out the moment an actual ethnicity filter is applied —
-    // they can't match "русские" or "Большинство: украинцы" if they have no data at all.
-    return !isFilterActive();
-  }
+  // NPs without data behave like one more ethnicity ("Временно нет данных") — see tagSetOf.
   const sel = currentSelected();
   if(mode === 'dom'){
     if(sel.size === 0) return true;
@@ -2527,11 +2534,11 @@ function render(){
   const sel = currentSelected();
   const modeLabel = mode==='and' ? 'И' : mode==='dom' ? 'Больш.' : mode==='not' ? 'НЕ' : null;
   document.getElementById('eth-selected-count').textContent = mode==='or'
-    ? (sel.size===allRoots.length ? '' : `(${sel.size}/${allTags.length})`)
-    : (sel.size ? `(${modeLabel}: ${sel.size})` : '');
+    ? (sel.size===allRoots.length ? '' : `(${fmtNum(sel.size)}/${fmtNum(allTags.length)})`)
+    : (sel.size ? `(${modeLabel}: ${fmtNum(sel.size)})` : '');
   let total = 0;
   enabledLayers.forEach(n => total += (layerCounts[n]||0));
-  document.getElementById('stats').innerHTML = `Показано НП: <b>${visibleCount}</b> из <b>${total}</b> (в активных слоях)`;
+  document.getElementById('stats').innerHTML = `Показано НП: <b>${fmtNum(visibleCount)}</b> из <b>${fmtNum(total)}</b> (в активных слоях)`;
 }
 render();
 
@@ -2570,7 +2577,7 @@ function resetNpList(){
   npFiltered = q ? pool.filter(np => np.name.toLowerCase().includes(q)) : pool;
   npListEl.innerHTML = '';
   renderedCount = 0;
-  document.getElementById('np-count').textContent = `(${npFiltered.length})`;
+  document.getElementById('np-count').textContent = `(${fmtNum(npFiltered.length)})`;
   renderNpChunk();
 }
 resetNpList();
