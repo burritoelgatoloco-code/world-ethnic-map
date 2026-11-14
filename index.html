@@ -87,7 +87,7 @@
   #stats b { color:var(--text); }
 
   #map { flex:1; position:relative; }
-  .eth-popup { min-width:200px; max-width:280px; font-family:'Roboto',Arial,sans-serif; }
+  .eth-popup { min-width:200px; max-width:none; font-family:'Roboto',Arial,sans-serif; }
   .eth-popup .ph { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .eth-popup .ph .flag-ic { font-size:20px; width:auto; }
   .eth-popup h3 { margin:0; font-size:16px; font-weight:500; color:#202124; }
@@ -516,6 +516,8 @@ function flagHtmlFor(name, px){
 // 48.99 stays 48.99 (not 49.0); the 1e-7 only guards against float noise like 28.999999999.
 function fmtPct(x){ return (Math.floor(x*100 + 1e-7)/100).toFixed(2); }
 // Thousands separator (non-breaking space so a number never wraps): 20256 -> 20 256
+// Number of real ethnicities in a selection: the pseudo-entry «Временно нет данных» is listed but not counted.
+function ethN(set){ return set.size - (set.has(NO_DATA) ? 1 : 0); }
 function fmtNum(n){ const t = String(n); return /^\d+$/.test(t) ? t.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0') : t; }
 
 // Country-name display fixes: "Острова" -> "острова" mid-name (except Мэн, Святой Елены, Кука,
@@ -1862,7 +1864,7 @@ function renderCountryByEthList(filterQ){
   if(!countryByEthFocus){ actionsEl.style.display = 'none'; searchEl.style.display = 'none'; labelEl.textContent = ''; return; }
   actionsEl.style.display = 'flex';
   searchEl.style.display = 'block';
-  labelEl.textContent = `(${countryByEthFocus}: ${fmtNum(countryByEthToggles.size)})`;
+  labelEl.textContent = `(${countryByEthFocus}: ${fmtNum(ethN(countryByEthToggles))})`;
   const countByEth = {};
   let total = 0;
   DATA.forEach(np => {
@@ -2227,7 +2229,7 @@ function renderRegionByEthList(filterQ){
   }
   actionsEl.style.display = 'flex';
   searchEl.style.display = 'block';
-  labelEl.textContent = `(${regionByEthRegion}: ${fmtNum(regionByEthToggles.size)})`;
+  labelEl.textContent = `(${regionByEthRegion}: ${fmtNum(ethN(regionByEthToggles))})`;
   const countByEth = {};
   let total = 0;
   DATA.forEach(np => {
@@ -2424,14 +2426,24 @@ function editFormHtml(np){
 // (e.g. on an empty-map click) and lets edit actions target the exact card that was
 // clicked, even when several NPs' cards are open simultaneously.
 const openPopups = {};
+// Popup width adapts to the text: normal 280 px, but when a line is long (e.g. a "метисы (...)"
+// breakdown) the card may grow up to 480 px (never wider than the screen) instead of wrapping
+// into a narrow column. Leaflet still shrinks it to the content when the text is short.
+function popupMaxWidth(np){
+  const longest = Math.max(0, ...np.ethnicities.map(e => (e.pct_display != null ? e.pct_display.length + 4 : 0) + e.name.length),
+    ...(np.notes ? np.notes.split('\n').map(l => l.length) : [0]));
+  const w = longest > 36 ? 480 : 280;
+  return Math.max(240, Math.min(w, window.innerWidth - 60));
+}
 function openNpPopup(np){
   const existing = openPopups[np.id];
   if(existing){
+    existing.options.maxWidth = popupMaxWidth(np);
     existing.setContent(popupHtml(np));
     if(!map.hasLayer(existing)) existing.openOn(map);
     return;
   }
-  const popup = L.popup({ maxWidth: 280, closeOnClick: false, autoClose: false })
+  const popup = L.popup({ maxWidth: popupMaxWidth(np), closeOnClick: false, autoClose: false })
     .setLatLng([np.lat, np.lng])
     .setContent(popupHtml(np))
     .on('remove', () => { if(openPopups[np.id] === popup) delete openPopups[np.id]; })
@@ -2446,6 +2458,7 @@ window.startEditNp = function(id){
   const np = npById[id];
   const popup = openPopups[id];
   if(!np || !popup) return;
+  popup.options.maxWidth = Math.min(280, window.innerWidth - 60);
   popup.setContent(editFormHtml(np));
   setTimeout(() => {
     const ta = document.getElementById('edit-desc');
@@ -2539,8 +2552,8 @@ function render(){
   const sel = currentSelected();
   const modeLabel = mode==='and' ? 'И' : mode==='dom' ? 'Больш.' : mode==='not' ? 'НЕ' : null;
   document.getElementById('eth-selected-count').textContent = mode==='or'
-    ? (sel.size===allRoots.length ? '' : `(${fmtNum(sel.size)}/${fmtNum(allTags.length)})`)
-    : (sel.size ? `(${modeLabel}: ${fmtNum(sel.size)})` : '');
+    ? (sel.size===allRoots.length ? '' : `(${fmtNum(ethN(sel))}/${fmtNum(allTags.length - (allTags.includes(NO_DATA) ? 1 : 0))})`)
+    : (sel.size ? `(${modeLabel}: ${fmtNum(ethN(sel))})` : '');
   let total = 0;
   enabledLayers.forEach(n => total += (layerCounts[n]||0));
   document.getElementById('stats').innerHTML = `Показано НП: <b>${fmtNum(visibleCount)}</b> из <b>${fmtNum(total)}</b> (в активных слоях)`;
