@@ -2358,9 +2358,9 @@ function popupHtml(np){
   // break after the commas: "15% - метисы (14% мексиканцы," / "1% гватемальцы)".
   const lines = np.ethnicities.map(e => (e.pct_display != null ? `${e.pct_display}% - ${e.name}` : `${e.name}`)
     .replace(/(\d+(?:[.,]\d+)?%) (?=\S)/g, '$1\u00A0'));
-  // Only cards with a parenthetical breakdown ("метисы (14% …)") get the wider layout;
-  // every other card keeps the normal size.
-  const popW = lines.some(l => l.includes('(')) ? popupContentWidth(np, lines) : null;
+  // Only cards with a percentage breakdown in parentheses ("метисы (14% мексиканцы, …)") get the
+  // fixed wider layout; every other card keeps its normal size.
+  const popW = lines.some(l => /\(\s*\d/.test(l)) ? popupContentWidth() : null;
   const notesHtml = np.notes ? `<div class="hint" style="margin-top:6px; white-space:pre-wrap;">${np.notes.replace(/</g,'&lt;')}</div>` : '';
   return `<div class="eth-popup"${popW ? ` style="width:${popW}px"` : ''}>
     <div class="ph"><span class="flag-ic">${domRoot?flagHtmlFor(domRoot,18):'🏳️'}</span><h3>${np.name}</h3></div>
@@ -2432,19 +2432,18 @@ function editFormHtml(np){
 // (e.g. on an empty-map click) and lets edit actions target the exact card that was
 // clicked, even when several NPs' cards are open simultaneously.
 const openPopups = {};
-// Cards with a parenthetical breakdown get an explicit width (Leaflet measures a wrapping text
-// block too narrow on its own): as wide as the longest line needs, from 200 px up to 270 px.
+// NP cards with a parenthetical breakdown get a fixed width: just enough for the reference line
+// "15% - метисы (14% мексиканцы," — longer lines wrap onto the next line instead of
+// stretching the card. (Set explicitly because Leaflet measures wrapping text too narrow.)
 let _mctx = null;
 function textW(t, font){
   if(!_mctx) _mctx = document.createElement('canvas').getContext('2d');
   _mctx.font = font;
   return _mctx.measureText(t).width;
 }
-function popupContentWidth(np, lines){
-  const lineW = Math.max(0, ...lines.map(l => textW(l, '14px Roboto, Arial, sans-serif')));
-  const titleW = textW(np.name, '500 16px Roboto, Arial, sans-serif') + 30;
-  const w = Math.ceil(Math.max(200, Math.min(270, Math.max(lineW, titleW) + 12)));
-  return Math.min(w, Math.max(200, window.innerWidth - 90));
+function popupContentWidth(){
+  const w = Math.ceil(textW('15% - метисы (14%\u00A0мексиканцы,', '14px Roboto, Arial, sans-serif')) + 6;
+  return Math.min(Math.max(w, 200), Math.max(200, window.innerWidth - 90));
 }
 function popupMaxWidth(np){
   return Math.max(240, Math.min(280, window.innerWidth - 60));
