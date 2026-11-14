@@ -456,6 +456,20 @@ function showLoginDialog(){
   };
 }
 
+// Show the login dialog right away (don't wait for the ~20 MB of map data to download).
+if(isAdminVisit && !hasStoredSession){
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showLoginDialog);
+  else showLoginDialog();
+}
+
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest && e.target.closest('#logout-link');
+  if(!a) return;
+  e.preventDefault();
+  try{ await supabaseClient.auth.signOut(); }catch(_){ }
+  window.location.replace(window.location.pathname);
+});
+
 // ---------- Lightweight visit tracking (table "page_visits") ----------
 // Unlike settlements/edits, this runs for EVERY visitor, editor or not — it's the
 // opposite of what the rest of this file avoids for regular viewers. The reason
@@ -771,18 +785,7 @@ async function initMap(){
       document.getElementById('visits-stats-section').style.display = 'flex';
       loadVisitStats();
       ensureAllRegionsLoaded(); // one-off for your own session — so the edit form's "Регион" autocomplete has every country ready
-      const statsEl = document.getElementById('stats');
-      if(statsEl){
-        const out = document.createElement('div');
-        out.style.cssText = 'padding:2px 18px 14px;font-size:12px;';
-        out.innerHTML = '<a href="#" id="logout-link" style="color:#5f6368;">Выйти из режима редактора</a>';
-        statsEl.parentNode.insertBefore(out, statsEl.nextSibling);
-        document.getElementById('logout-link').onclick = async (e) => {
-          e.preventDefault();
-          try{ await supabaseClient.auth.signOut(); }catch(_){ }
-          window.location.replace(window.location.pathname);
-        };
-      }
+      window.__ethAdminSession = true; // makes the stats line show the «Выйти» link
     }
   }catch(err){ /* ignore — just stays in read-only view */ }
 
@@ -2648,7 +2651,8 @@ function render(){
     : (sel.size ? `(${modeLabel}: ${fmtNum(ethN(sel))})` : '');
   let total = 0;
   enabledLayers.forEach(n => total += (layerCounts[n]||0));
-  document.getElementById('stats').innerHTML = `Показано НП: <b>${fmtNum(visibleCount)}</b> из <b>${fmtNum(total)}</b> (в активных слоях)`;
+  document.getElementById('stats').innerHTML = `Показано НП: <b>${fmtNum(visibleCount)}</b> из <b>${fmtNum(total)}</b> (в активных слоях)`
+    + (window.__ethAdminSession ? '<br><a href="#" id="logout-link" style="color:#5f6368;">Выйти из режима редактора</a>' : '');
 }
 render();
 
