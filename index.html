@@ -213,9 +213,9 @@
       </div>
       <div class="section-body" id="eth-body" style="display:none;">
         <div class="mode-row">
+          <div class="mode-btn" id="mode-dom" title="Показать НП, где выбранный — самый крупный (доминирует)">Больш-во</div>
           <div class="mode-btn active" id="mode-or" title="Показать НП, где есть хотя бы один из выбранных">ИЛИ</div>
           <div class="mode-btn" id="mode-and" title="Показать НП, где есть ВСЕ выбранные одновременно">И</div>
-          <div class="mode-btn" id="mode-dom" title="Показать НП, где выбранный — самый крупный (доминирует)">Больш-во</div>
           <div class="mode-btn" id="mode-not" title="Показать НП, где выбранного этноса НЕТ вообще">НЕ</div>
         </div>
         <input id="eth-search" class="box" placeholder="Поиск этноса…" />
@@ -233,6 +233,10 @@
         <span class="chevron">▸</span>
       </div>
       <div class="section-body" id="sub-body" style="display:none;">
+        <div class="mode-row">
+          <div class="mode-btn" id="sub-mode-dom" title="Показать НП, где выбранный — самый крупный (доминирует)">Больш-во</div>
+          <div class="mode-btn active" id="sub-mode-or" title="Показать НП, где есть хотя бы один из выбранных">ИЛИ</div>
+        </div>
         <input id="sub-search" class="box" placeholder="Поиск субэтноса/субгруппы…" />
         <div class="btn-row">
           <div class="btn-mini" id="sub-select-all">Включить все</div>
@@ -384,22 +388,73 @@ const supabaseClient = (window.supabase && SUPABASE_URL && SUPABASE_KEY)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 
-// Top-level (not inside initMap) so trackVisit below — which fires immediately, before
-// initMap even starts — can also check admin status, to skip counting your own visits.
-const ADMIN_SECRET = 'ethnic2026'; // change this string (and your bookmarked link) if you want a new secret
+// Editor mode is protected by a real login (Supabase Auth, email + password set in the Supabase
+// dashboard — the password is never in this file). Opening the site with "?edit" only shows the
+// login dialog; it grants nothing by itself. Writing to the database is additionally blocked
+// server-side (Row Level Security) for everyone who isn't logged in.
+// Top-level (not inside initMap) so trackVisit below — which fires immediately, before initMap
+// even starts — can also skip counting your own visits.
 const isAdminVisit = (() => {
-  try{ return new URLSearchParams(window.location.search).get('edit') === ADMIN_SECRET; }
+  try{ return new URLSearchParams(window.location.search).has('edit'); }
   catch(err){ return false; }
 })();
-// Once the admin link has been opened on this device even once, remember that this
-// browser is yours — so it also gets excluded from tracking on plain viewer-link visits
-// (no ?edit=) from then on, without needing your IP or anything else identifying.
+// supabase-js keeps the login session in localStorage under a key like "sb-<project>-auth-token".
+const hasStoredSession = (() => {
+  try{ return Object.keys(localStorage).some(k => /^sb-.+-auth-token$/.test(k)); }
+  catch(err){ return false; }
+})();
+// Once you have opened the login link or been logged in on this device, remember that this
+// browser is yours — so it is excluded from visit tracking, without IP or anything identifying.
 const isOwnerDevice = (() => {
   try{
-    if(isAdminVisit) localStorage.setItem('ethmap_owner', '1');
+    if(isAdminVisit || hasStoredSession) localStorage.setItem('ethmap_owner', '1');
     return localStorage.getItem('ethmap_owner') === '1';
-  }catch(err){ return isAdminVisit; }
+  }catch(err){ return isAdminVisit || hasStoredSession; }
 })();
+
+function showLoginDialog(){
+  if(document.getElementById('login-overlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'login-overlay';
+  ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(32,33,36,.5);display:flex;align-items:center;justify-content:center;font-family:'Roboto',Arial,sans-serif;";
+  ov.innerHTML = `
+    <form id="login-form" style="background:#fff;border-radius:14px;padding:22px 24px;width:300px;max-width:calc(100vw - 40px);box-shadow:0 8px 30px rgba(0,0,0,.3);">
+      <div style="font-size:17px;font-weight:500;color:#202124;margin-bottom:14px;">Вход для редактора</div>
+      <input id="login-email" type="email" autocomplete="username" placeholder="Почта" required
+        style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:10px;border:1px solid #dadce0;border-radius:8px;font-size:14px;">
+      <input id="login-pass" type="password" autocomplete="current-password" placeholder="Пароль" required
+        style="width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:10px;border:1px solid #dadce0;border-radius:8px;font-size:14px;">
+      <div id="login-err" style="color:#d93025;font-size:13px;min-height:18px;margin-bottom:6px;"></div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button id="login-go" type="submit" style="background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:9px 18px;font-size:14px;cursor:pointer;">Войти</button>
+        <a href="#" id="login-cancel" style="color:#5f6368;font-size:13px;text-decoration:none;">Закрыть</a>
+      </div>
+    </form>`;
+  document.body.appendChild(ov);
+  const email = document.getElementById('login-email');
+  email.focus();
+  document.getElementById('login-cancel').onclick = (e) => { e.preventDefault(); ov.remove(); };
+  document.getElementById('login-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('login-err');
+    const btn = document.getElementById('login-go');
+    err.textContent = '';
+    if(!supabaseClient){ err.textContent = 'Нет связи с базой.'; return; }
+    btn.disabled = true;
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: email.value.trim(),
+      password: document.getElementById('login-pass').value
+    });
+    if(error){
+      btn.disabled = false;
+      err.textContent = 'Неверная почта или пароль.';
+      return;
+    }
+    try{ localStorage.setItem('ethmap_owner', '1'); }catch(_){ }
+    // Reload without "?edit" — from now on the saved session itself switches editor mode on.
+    window.location.replace(window.location.pathname);
+  };
+}
 
 // ---------- Lightweight visit tracking (table "page_visits") ----------
 // Unlike settlements/edits, this runs for EVERY visitor, editor or not — it's the
@@ -515,9 +570,9 @@ function flagHtmlFor(name, px){
 // Percent without rounding: truncates (never rounds up) to exactly 2 decimals (1.1 -> 1.10).
 // 48.99 stays 48.99 (not 49.0); the 1e-7 only guards against float noise like 28.999999999.
 function fmtPct(x){ return (Math.floor(x*100 + 1e-7)/100).toFixed(2); }
-// Thousands separator (non-breaking space so a number never wraps): 20256 -> 20 256
 // Number of real ethnicities in a selection: the pseudo-entry «Временно нет данных» is listed but not counted.
 function ethN(set){ return set.size - (set.has(NO_DATA) ? 1 : 0); }
+// Thousands separator (non-breaking space so a number never wraps): 20256 -> 20 256
 function fmtNum(n){ const t = String(n); return /^\d+$/.test(t) ? t.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0') : t; }
 
 // Country-name display fixes: "Острова" -> "острова" mid-name (except Мэн, Святой Елены, Кука,
@@ -705,14 +760,29 @@ async function initMap(){
   // static per-layer files instead), only the editor should see live/unbaked changes. ----------
   let isAdmin = false;
   try{
-    const params = new URLSearchParams(window.location.search);
-    if(params.get('edit') === ADMIN_SECRET){
-      isAdmin = true;
+    if(supabaseClient){
+      const { data: sess } = await supabaseClient.auth.getSession();
+      isAdmin = !!(sess && sess.session);
+    }
+    if(!isAdmin && isAdminVisit) showLoginDialog();
+    if(isAdmin){
       document.getElementById('layers-section').style.display = 'flex';
       document.getElementById('add-np-section').style.display = 'flex';
       document.getElementById('visits-stats-section').style.display = 'flex';
       loadVisitStats();
       ensureAllRegionsLoaded(); // one-off for your own session — so the edit form's "Регион" autocomplete has every country ready
+      const statsEl = document.getElementById('stats');
+      if(statsEl){
+        const out = document.createElement('div');
+        out.style.cssText = 'padding:2px 18px 14px;font-size:12px;';
+        out.innerHTML = '<a href="#" id="logout-link" style="color:#5f6368;">Выйти из режима редактора</a>';
+        statsEl.parentNode.insertBefore(out, statsEl.nextSibling);
+        document.getElementById('logout-link').onclick = async (e) => {
+          e.preventDefault();
+          try{ await supabaseClient.auth.signOut(); }catch(_){ }
+          window.location.replace(window.location.pathname);
+        };
+      }
     }
   }catch(err){ /* ignore — just stays in read-only view */ }
 
@@ -1103,6 +1173,9 @@ function setMode(m){
   mode = m;
   ['mode-or','mode-and','mode-dom','mode-not'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('mode-'+m).classList.add('active');
+  // The two buttons in the sub-ethnicities panel mirror the same (shared) mode.
+  document.getElementById('sub-mode-or').classList.toggle('active', m==='or');
+  document.getElementById('sub-mode-dom').classList.toggle('active', m==='dom');
   rootList.reset(document.getElementById('eth-search').value);
   subList.reset(document.getElementById('sub-search').value);
   render();
@@ -1111,6 +1184,8 @@ document.getElementById('mode-or').onclick = () => setMode('or');
 document.getElementById('mode-and').onclick = () => setMode('and');
 document.getElementById('mode-dom').onclick = () => setMode('dom');
 document.getElementById('mode-not').onclick = () => setMode('not');
+document.getElementById('sub-mode-or').onclick = () => setMode('or');
+document.getElementById('sub-mode-dom').onclick = () => setMode('dom');
 
 // ---------- Flag upload ----------
 const fileInput = document.getElementById('flag-file-input');
@@ -1165,7 +1240,7 @@ function triggerUpload(name){
 }
 
 // ---------- Generic toggle list (roots / subs) ----------
-function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countFn){
+function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countFn, showFlags = true){
   let filtered = [], rendered = 0;
   const CHUNK = 150;
   function row(name){
@@ -1173,15 +1248,16 @@ function buildToggleList(listEl, searchEl, btnAllId, btnNoneId, getNames, countF
     const div = document.createElement('div');
     div.className = 'eth-item';
     div.innerHTML = `
-      <span class="flag-ic">${flagHtmlFor(name,15)}</span>
+      ${showFlags ? `<span class="flag-ic">${flagHtmlFor(name,15)}</span>` : ''}
       <span class="eth-name" title="${name}">${cap(name)}</span>
-      <span class="upload-ic" title="Загрузить свой флаг для «${name}»" ${name===NO_DATA?'style="visibility:hidden"':''}>📎</span>
+      ${showFlags ? `<span class="upload-ic" title="Загрузить свой флаг для «${name}»" ${name===NO_DATA?'style="visibility:hidden"':''}>📎</span>` : ''}
       <span class="eth-count">${fmtNum(countFn(name))}</span>
       <label class="switch">
         <input type="checkbox" ${sel.has(name)?'checked':''} data-eth="${name}">
         <span class="slider"></span>
       </label>`;
-    div.querySelector('.upload-ic').onclick = (ev) => { ev.stopPropagation(); triggerUpload(name); };
+    const upIc = div.querySelector('.upload-ic');
+    if(upIc) upIc.onclick = (ev) => { ev.stopPropagation(); triggerUpload(name); };
     return div;
   }
   function renderChunk(){
@@ -1232,10 +1308,13 @@ const subCountFn  = name => mode==='dom' ? (subDominant[name]||0)  : (subPresenc
 const rootNamesFn = () => mode==='dom' ? allRootsByDom : allRoots;
 const subNamesFn  = () => mode==='dom' ? allSubsByDom  : allSubs;
 const rootList = buildToggleList(document.getElementById('eth-list'), document.getElementById('eth-search'), 'select-all', 'select-none', rootNamesFn, rootCountFn);
-const subList  = buildToggleList(document.getElementById('sub-list'), document.getElementById('sub-search'), 'sub-select-all', 'sub-select-none', subNamesFn, subCountFn);
+const subList  = buildToggleList(document.getElementById('sub-list'), document.getElementById('sub-search'), 'sub-select-all', 'sub-select-none', subNamesFn, subCountFn, false);
 
 // ---------- Map ----------
 const map = L.map('map', { zoomControl:false }).setView([30, 20], 3);
+// Leaflet 1.9 shows a Ukrainian flag in the attribution by default (for everyone, regardless of
+// location). Keep the Leaflet link but drop the flag; the tile-provider credits stay as required.
+map.attributionControl.setPrefix('<a href="https://leafletjs.com" title="A JavaScript library for interactive maps">Leaflet</a>');
 L.control.zoom({ position:'bottomright' }).addTo(map);
 
 const baseLayers = {
